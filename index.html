@@ -494,6 +494,48 @@
   }
   .att-geo-retry:hover { opacity: 1; }
 
+  .att-photo-fallback-btn {
+    width: 100%; margin: -2px 0 10px; padding: 9px; border: 1px dashed var(--border); background: var(--surface);
+    color: var(--text-muted); font-size: 12px; font-weight: 700; border-radius: 8px; cursor: pointer;
+  }
+  .att-photo-fallback-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .att-photo-ready {
+    font-size: 12px; padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; line-height: 1.4;
+    background: var(--accent-soft); color: var(--accent); font-weight: 600; display: flex; align-items: center; gap: 8px;
+  }
+  .att-photo-ready img { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; flex: none; }
+  .att-photo-ready .retake {
+    margin-left: auto; border: 1px solid currentColor; background: transparent; color: inherit;
+    font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  }
+  .att-verify-thumb { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; cursor: pointer; border: 1px solid var(--border); }
+  .att-verify-gps { font-size: 15px; }
+  .att-verify-none { color: var(--text-faint); }
+
+  .face-cam-overlay {
+    position: fixed; inset: 0; background: #000; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .face-cam-video, .face-cam-preview { width: 100%; height: 100%; object-fit: cover; }
+  .face-cam-topbar {
+    position: absolute; top: 0; left: 0; right: 0; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;
+    color: #fff; font-size: 13px; font-weight: 700; z-index: 2; background: linear-gradient(rgba(0,0,0,0.55), transparent);
+  }
+  .face-cam-close { background: rgba(255,255,255,0.15); border: none; color: #fff; width: 30px; height: 30px; border-radius: 50%; font-size: 16px; cursor: pointer; }
+  .face-cam-controls {
+    position: absolute; bottom: 0; left: 0; right: 0; padding: 22px 20px calc(22px + env(safe-area-inset-bottom, 0px));
+    display: flex; align-items: center; justify-content: center; gap: 16px; z-index: 2; background: linear-gradient(transparent, rgba(0,0,0,0.6));
+  }
+  .face-cam-shutter { width: 68px; height: 68px; border-radius: 50%; background: #fff; border: 4px solid rgba(255,255,255,0.4); cursor: pointer; }
+  .face-cam-shutter:active { transform: scale(0.94); }
+  .face-cam-btn2 { padding: 12px 20px; border-radius: 999px; border: none; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .face-cam-btn2.retake { background: rgba(255,255,255,0.15); color: #fff; }
+  .face-cam-btn2.use { background: var(--accent); color: var(--accent-ink); }
+  .face-cam-msg { color: #fff; font-size: 13px; text-align: center; padding: 0 24px; line-height: 1.6; }
+  .photo-lightbox {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out;
+  }
+  .photo-lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+
   .att-map { height: 260px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 10px; background: var(--surface-2); }
   .att-map.small { height: 180px; }
   .att-map-fallback {
@@ -1431,7 +1473,15 @@
 
     var geo = getAttGeo(st);
     var geoStatusHtml = buildAttGeoStatusHtml(geo);
-    var canClock = !geo.enabled || (attLocationState.status === "ok" && attLocationState.within);
+    var geoFailed = geo.enabled && (attLocationState.status === "error" || attLocationState.status === "unsupported");
+    var photoFallbackHtml = "";
+    if (geoFailed) {
+      photoFallbackHtml = pendingAttPhoto ?
+        '<div class="att-photo-ready"><img src="' + pendingAttPhoto.dataUrl + '" alt="">얼굴 사진으로 인증 준비됐어요' +
+          '<button type="button" class="retake" id="btnAttPhotoRetake">다시 찍기</button></div>' :
+        '<button type="button" class="att-photo-fallback-btn" id="btnAttPhotoFallback">📷 GPS 대신 얼굴 사진으로 인증하기</button>';
+    }
+    var canClock = !geo.enabled || (attLocationState.status === "ok" && attLocationState.within) || (geoFailed && !!pendingAttPhoto);
     var disabledAttr = canClock ? "" : " disabled";
 
     var statusHtml;
@@ -1446,7 +1496,7 @@
           '<div class="att-status-times">' + fmtHM(openRecord.clockInAt) + ' 출근</div>' +
           '<div class="att-status-sub">경과 ' + fmtDurationMs(elapsed) + "</div>" +
         "</div>" +
-        geoStatusHtml +
+        geoStatusHtml + photoFallbackHtml +
         '<button type="button" class="att-clock-btn att-out" id="btnClockOut" data-record-id="' + openRecord.id + '"' + disabledAttr + '>퇴근하기</button>';
     } else if (todayRecords.length) {
       var last = todayRecords[0];
@@ -1455,7 +1505,7 @@
           '<div class="att-status-times">' + fmtHM(last.clockInAt) + " – " + fmtHM(last.clockOutAt) + "</div>" +
           '<div class="att-status-sub">총 ' + fmtDurationMs(last.clockOutAt - last.clockInAt) + "</div>" +
         "</div>" +
-        geoStatusHtml +
+        geoStatusHtml + photoFallbackHtml +
         '<button type="button" class="att-clock-btn att-in" id="btnClockIn"' + disabledAttr + '>다시 출근하기</button>' +
         '<button type="button" class="att-reset-btn" id="btnResetAtt" data-record-id="' + last.id + '">방금 기록 취소</button>';
     } else {
@@ -1463,7 +1513,7 @@
           '<div class="att-status-label">출근 전이에요</div>' +
           '<div class="att-status-sub">버튼을 눌러 출근을 기록하세요</div>' +
         "</div>" +
-        geoStatusHtml +
+        geoStatusHtml + photoFallbackHtml +
         '<button type="button" class="att-clock-btn att-in" id="btnClockIn"' + disabledAttr + '>출근하기</button>';
     }
     return finishAttendancePhone(workerId, team, teamOpts, statusHtml, log, geo);
@@ -2336,6 +2386,11 @@
       return true;
     }).sort(function (a, b) { return (a.clockInAt || 0) - (b.clockInAt || 0); });
 
+    function attVerifyCellHtml(loc, photo) {
+      if (photo) return '<img class="att-verify-thumb" src="' + photo + '" alt="얼굴 사진">';
+      if (loc) return '<span class="att-verify-gps" title="GPS로 확인됨">📍</span>';
+      return '<span class="att-verify-none">–</span>';
+    }
     var totalMs = 0, openCount = 0;
     var rowsHtml = dayRecords.map(function (r) {
       var dur = r.clockOutAt ? (r.clockOutAt - r.clockInAt) : null;
@@ -2345,7 +2400,9 @@
         '<td class="rowlabel">' + escapeHtml(r.workerId) + "</td>" +
         "<td>" + escapeHtml(r.team) + "</td>" +
         '<td class="num">' + fmtHM(r.clockInAt) + "</td>" +
+        "<td>" + attVerifyCellHtml(r.clockInLoc, r.clockInPhoto) + "</td>" +
         '<td class="num">' + (r.clockOutAt ? fmtHM(r.clockOutAt) : "–") + "</td>" +
+        "<td>" + (r.clockOutAt ? attVerifyCellHtml(r.clockOutLoc, r.clockOutPhoto) : "–") + "</td>" +
         '<td class="num">' + (dur ? fmtDurationMs(dur) : "–") + "</td>" +
         "<td>" + statusHtml + "</td>" +
       "</tr>";
@@ -2358,7 +2415,7 @@
         "</div>" +
         (dayRecords.length ?
           '<div class="stat-table-wrap"><table class="stat-table">' +
-            '<thead><tr><th class="rowlabel">작업자</th><th>소속팀</th><th>출근</th><th>퇴근</th><th>근무시간</th><th>상태</th></tr></thead>' +
+            '<thead><tr><th class="rowlabel">작업자</th><th>소속팀</th><th>출근</th><th>출근확인</th><th>퇴근</th><th>퇴근확인</th><th>근무시간</th><th>상태</th></tr></thead>' +
             "<tbody>" + rowsHtml + "</tbody>" +
           "</table></div>" :
           '<div class="empty-state" style="padding:20px 0">이 날짜에는 기록이 없어요</div>') +
@@ -2649,12 +2706,143 @@
     if (outBtn) outBtn.addEventListener("click", function () { clockOut(this.getAttribute("data-record-id")); });
     var resetBtn = document.getElementById("btnResetAtt");
     if (resetBtn) resetBtn.addEventListener("click", function () { resetAttendanceRecord(this.getAttribute("data-record-id")); });
+    var photoFallbackBtn = document.getElementById("btnAttPhotoFallback");
+    if (photoFallbackBtn) {
+      photoFallbackBtn.addEventListener("click", function () {
+        openFaceCameraModal(function (dataUrl) {
+          pendingAttPhoto = { dataUrl: dataUrl, capturedAt: Date.now() };
+          renderInputView();
+        });
+      });
+    }
+    var photoRetakeBtn = document.getElementById("btnAttPhotoRetake");
+    if (photoRetakeBtn) {
+      photoRetakeBtn.addEventListener("click", function () {
+        openFaceCameraModal(function (dataUrl) {
+          pendingAttPhoto = { dataUrl: dataUrl, capturedAt: Date.now() };
+          renderInputView();
+        });
+      });
+    }
   }
 
   function currentAttLocPayload() {
     var s = attLocationState;
     if (s.status !== "ok") return null;
     return { lat: s.lat, lng: s.lng, accuracy: s.accuracy, distance: Math.round(s.distance) };
+  }
+
+  // ---- GPS-fallback face photo verification (mobile camera only, no gallery, no PC) ----
+  var pendingAttPhoto = null; // { dataUrl, capturedAt } — set once a selfie has been captured for this action
+  function isMobileDevice() {
+    var ua = (window.navigator && navigator.userAgent) || "";
+    if (/Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua)) return true;
+    // iPadOS 13+ reports its UA as a Mac, so fall back to a touch-points check.
+    if (window.navigator && navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua)) return true;
+    return false;
+  }
+  function formatStampDateTime(ts) {
+    var d = new Date(ts);
+    function p2(n) { return n < 10 ? "0" + n : "" + n; }
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) +
+      " (" + WEEKDAY_LABELS[d.getDay()] + ") " + p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds());
+  }
+  function openFaceCameraModal(onCapture) {
+    if (!isMobileDevice()) { showToast("이 기능은 모바일에서만 사용할 수 있어요"); return; }
+    if (!(window.navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      showToast("이 기기·브라우저는 카메라를 사용할 수 없어요");
+      return;
+    }
+    var overlay = document.createElement("div");
+    overlay.className = "face-cam-overlay";
+    overlay.innerHTML =
+      '<div class="face-cam-topbar"><span>📷 얼굴 사진 촬영</span><button type="button" class="face-cam-close" data-cam-close>✕</button></div>' +
+      '<div class="face-cam-msg" data-cam-msg>카메라를 여는 중…</div>' +
+      '<video class="face-cam-video" autoplay playsinline muted style="display:none"></video>' +
+      '<img class="face-cam-preview" style="display:none">' +
+      '<div class="face-cam-controls" style="display:none" data-cam-controls></div>';
+    document.body.appendChild(overlay);
+
+    var video = overlay.querySelector("video");
+    var previewImg = overlay.querySelector(".face-cam-preview");
+    var msgEl = overlay.querySelector("[data-cam-msg]");
+    var controls = overlay.querySelector("[data-cam-controls]");
+    var stream = null;
+
+    function stopStream() {
+      if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    }
+    function close() {
+      stopStream();
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+    overlay.querySelector("[data-cam-close]").addEventListener("click", close);
+
+    function showShutter() {
+      controls.style.display = "flex";
+      controls.innerHTML = '<button type="button" class="face-cam-shutter" data-cam-shutter></button>';
+      controls.querySelector("[data-cam-shutter]").addEventListener("click", capture);
+    }
+    function showConfirm(dataUrl) {
+      controls.style.display = "flex";
+      controls.innerHTML =
+        '<button type="button" class="face-cam-btn2 retake" data-cam-retake>다시 찍기</button>' +
+        '<button type="button" class="face-cam-btn2 use" data-cam-use>이 사진 사용</button>';
+      controls.querySelector("[data-cam-retake]").addEventListener("click", function () {
+        previewImg.style.display = "none";
+        video.style.display = "block";
+        showShutter();
+      });
+      controls.querySelector("[data-cam-use]").addEventListener("click", function () {
+        close();
+        onCapture(dataUrl);
+      });
+    }
+    function capture() {
+      var vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+      var maxDim = 800;
+      var scale = Math.min(1, maxDim / Math.max(vw, vh));
+      var cw = Math.max(1, Math.round(vw * scale)), ch = Math.max(1, Math.round(vh * scale));
+      var canvas = document.createElement("canvas");
+      canvas.width = cw; canvas.height = ch;
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, cw, ch);
+      var stamp = formatStampDateTime(Date.now());
+      var barH = Math.max(26, Math.round(ch * 0.09));
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, ch - barH, cw, barH);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "700 " + Math.round(barH * 0.46) + "px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      ctx.fillText(stamp, cw / 2, ch - barH / 2);
+      var dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+      video.style.display = "none";
+      previewImg.src = dataUrl;
+      previewImg.style.display = "block";
+      showConfirm(dataUrl);
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false }).then(function (s) {
+      if (!overlay.parentNode) { s.getTracks().forEach(function (t) { t.stop(); }); return; } // closed while awaiting permission
+      stream = s;
+      video.srcObject = stream;
+      video.style.display = "block";
+      msgEl.style.display = "none";
+      showShutter();
+    }).catch(function () {
+      msgEl.textContent = "카메라 권한을 허용해주세요. 브라우저 설정에서 카메라 접근을 켜야 촬영할 수 있어요.";
+      controls.style.display = "flex";
+      controls.innerHTML = '<button type="button" class="face-cam-btn2 retake" data-cam-close2>닫기</button>';
+      controls.querySelector("[data-cam-close2]").addEventListener("click", close);
+    });
+  }
+  function openPhotoLightbox(dataUrl) {
+    var box = document.createElement("div");
+    box.className = "photo-lightbox";
+    box.innerHTML = '<img src="' + dataUrl + '" alt="인증 사진">';
+    box.addEventListener("click", function () { if (box.parentNode) box.parentNode.removeChild(box); });
+    document.body.appendChild(box);
   }
 
   function clockIn() {
@@ -2664,7 +2852,10 @@
     var team = document.getElementById("aTeam").value;
     saveWorkerTeam(team);
     var geo = getAttGeo(state);
-    if (geo.enabled && !(attLocationState.status === "ok" && attLocationState.within)) {
+    var geoOk = attLocationState.status === "ok" && attLocationState.within;
+    var geoFailed = geo.enabled && (attLocationState.status === "error" || attLocationState.status === "unsupported");
+    var photoOk = geoFailed && !!pendingAttPhoto;
+    if (geo.enabled && !geoOk && !photoOk) {
       showToast("지정 현장 반경 안에서만 출근할 수 있어요");
       return;
     }
@@ -2673,8 +2864,10 @@
     if (already) { showToast("이미 출근 중이에요"); renderInputView(); return; }
     var record = {
       id: uid(), workerId: workerId, team: team, date: todayStr(), clockInAt: Date.now(), clockOutAt: null,
-      clockInLoc: currentAttLocPayload()
+      clockInLoc: currentAttLocPayload(),
+      clockInPhoto: photoOk ? pendingAttPhoto.dataUrl : null
     };
+    pendingAttPhoto = null;
     state.attendance.unshift(record);
     var btn = document.getElementById("btnClockIn");
     if (btn) { btn.disabled = true; btn.textContent = "저장 중…"; }
@@ -2689,12 +2882,17 @@
     var record = state.attendance.filter(function (r) { return r.id === recordId; })[0];
     if (!record) return;
     var geo = getAttGeo(state);
-    if (geo.enabled && !(attLocationState.status === "ok" && attLocationState.within)) {
+    var geoOk = attLocationState.status === "ok" && attLocationState.within;
+    var geoFailed = geo.enabled && (attLocationState.status === "error" || attLocationState.status === "unsupported");
+    var photoOk = geoFailed && !!pendingAttPhoto;
+    if (geo.enabled && !geoOk && !photoOk) {
       showToast("지정 현장 반경 안에서만 퇴근할 수 있어요");
       return;
     }
     record.clockOutAt = Date.now();
     record.clockOutLoc = currentAttLocPayload();
+    record.clockOutPhoto = photoOk ? pendingAttPhoto.dataUrl : null;
+    pendingAttPhoto = null;
     var btn = document.getElementById("btnClockOut");
     if (btn) { btn.disabled = true; btn.textContent = "저장 중…"; }
     persist(function (ok) {
@@ -3155,6 +3353,11 @@
           var table = panel ? panel.querySelector("table") : null;
           if (table) downloadCsv(csvBtn.getAttribute("data-csv-name"), tableToCsv(table));
         }
+        return;
+      }
+      var verifyThumb = e.target.closest ? e.target.closest(".att-verify-thumb") : null;
+      if (verifyThumb) {
+        openPhotoLightbox(verifyThumb.getAttribute("src"));
         return;
       }
       var dlBtn = e.target.closest ? e.target.closest(".gallery-dl") : null;
