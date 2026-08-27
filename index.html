@@ -2854,20 +2854,30 @@
     var geo = getAttGeo(state);
     var geoOk = attLocationState.status === "ok" && attLocationState.within;
     var geoFailed = geo.enabled && (attLocationState.status === "error" || attLocationState.status === "unsupported");
-    var photoOk = geoFailed && !!pendingAttPhoto;
-    if (geo.enabled && !geoOk && !photoOk) {
+    if (geo.enabled && !geoOk && !(geoFailed && pendingAttPhoto)) {
       showToast("지정 현장 반경 안에서만 출근할 수 있어요");
       return;
     }
     if (!state.attendance) state.attendance = [];
     var already = state.attendance.some(function (r) { return r.workerId === workerId && !r.clockOutAt; });
     if (already) { showToast("이미 출근 중이에요"); renderInputView(); return; }
+
+    if (pendingAttPhoto) {
+      var readyPhoto = pendingAttPhoto.dataUrl;
+      pendingAttPhoto = null;
+      finishClockIn(workerId, team, readyPhoto);
+    } else {
+      // Reached with GPS OK (within radius) or geofencing disabled — take a fresh face photo now.
+      openFaceCameraModal(function (dataUrl) { finishClockIn(workerId, team, dataUrl); });
+    }
+  }
+
+  function finishClockIn(workerId, team, photoDataUrl) {
     var record = {
       id: uid(), workerId: workerId, team: team, date: todayStr(), clockInAt: Date.now(), clockOutAt: null,
       clockInLoc: currentAttLocPayload(),
-      clockInPhoto: photoOk ? pendingAttPhoto.dataUrl : null
+      clockInPhoto: photoDataUrl || null
     };
-    pendingAttPhoto = null;
     state.attendance.unshift(record);
     var btn = document.getElementById("btnClockIn");
     if (btn) { btn.disabled = true; btn.textContent = "저장 중…"; }
@@ -2884,15 +2894,24 @@
     var geo = getAttGeo(state);
     var geoOk = attLocationState.status === "ok" && attLocationState.within;
     var geoFailed = geo.enabled && (attLocationState.status === "error" || attLocationState.status === "unsupported");
-    var photoOk = geoFailed && !!pendingAttPhoto;
-    if (geo.enabled && !geoOk && !photoOk) {
+    if (geo.enabled && !geoOk && !(geoFailed && pendingAttPhoto)) {
       showToast("지정 현장 반경 안에서만 퇴근할 수 있어요");
       return;
     }
+
+    if (pendingAttPhoto) {
+      var readyPhoto = pendingAttPhoto.dataUrl;
+      pendingAttPhoto = null;
+      finishClockOut(record, readyPhoto);
+    } else {
+      openFaceCameraModal(function (dataUrl) { finishClockOut(record, dataUrl); });
+    }
+  }
+
+  function finishClockOut(record, photoDataUrl) {
     record.clockOutAt = Date.now();
     record.clockOutLoc = currentAttLocPayload();
-    record.clockOutPhoto = photoOk ? pendingAttPhoto.dataUrl : null;
-    pendingAttPhoto = null;
+    record.clockOutPhoto = photoDataUrl || null;
     var btn = document.getElementById("btnClockOut");
     if (btn) { btn.disabled = true; btn.textContent = "저장 중…"; }
     persist(function (ok) {
