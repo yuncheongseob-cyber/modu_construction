@@ -708,6 +708,86 @@
     }
   }
 
+  // ---- Firebase Realtime Database — shared cross-device storage for this app's state ----
+  // (loaded lazily via the classic "compat" SDK so it works from a plain <script>, no bundler needed)
+  var FIREBASE_CONFIG = {
+    apiKey: "AIzaSyB92L8KwZnzKQcHY8CMm2UH6_fO0PQqJ-8",
+    authDomain: "modu-construction.firebaseapp.com",
+    databaseURL: "https://modu-construction-default-rtdb.firebaseio.com",
+    projectId: "modu-construction",
+    storageBucket: "modu-construction.firebasestorage.app",
+    messagingSenderId: "37978778105",
+    appId: "1:37978778105:web:33527f3bbdf27d84373528"
+  };
+  var firebaseLoaded = false;
+  var firebaseFailed = false;
+  var firebaseLoading = false;
+  var firebaseReadyCallbacks = [];
+  var firebaseDb = null;
+  var firebaseSyncedOnce = false; // becomes true once we've received (or seeded) the first snapshot
+  function loadScriptSeq(urls, cb) {
+    var i = 0;
+    function next() {
+      if (i >= urls.length) { cb(true); return; }
+      var s = document.createElement("script");
+      s.src = urls[i];
+      s.onload = function () { i++; next(); };
+      s.onerror = function () { cb(false); };
+      document.head.appendChild(s);
+    }
+    next();
+  }
+  function ensureFirebase(cb) {
+    if (firebaseLoaded || firebaseFailed) { cb(); return; }
+    firebaseReadyCallbacks.push(cb);
+    if (firebaseLoading) return;
+    firebaseLoading = true;
+    loadScriptSeq([
+      "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js",
+      "https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"
+    ], function (ok) {
+      firebaseLoading = false;
+      if (ok && window.firebase) {
+        try {
+          firebase.initializeApp(FIREBASE_CONFIG);
+          firebaseDb = firebase.database();
+          firebaseLoaded = true;
+        } catch (e) {
+          firebaseFailed = true;
+        }
+      } else {
+        firebaseFailed = true;
+      }
+      var cbs = firebaseReadyCallbacks; firebaseReadyCallbacks = [];
+      cbs.forEach(function (f) { f(); });
+    });
+  }
+  function initFirebaseSync() {
+    ensureFirebase(function () {
+      if (!firebaseDb) {
+        setSyncStatus(false, "실시간 동기화를 불러오지 못했어요 (오프라인 모드)");
+        return;
+      }
+      var ref = firebaseDb.ref("state");
+      ref.on("value", function (snap) {
+        var remote = snap.val();
+        if (remote && remote.teams) {
+          state = remote;
+          firebaseSyncedOnce = true;
+          renderDashView(); // safe to refresh (read-only view); the input form is left alone so in-progress typing isn't wiped
+          setSyncStatus(true, "실시간 동기화됨");
+        } else if (!firebaseSyncedOnce) {
+          // empty database — seed it with whatever we currently have (the file's embedded snapshot)
+          firebaseSyncedOnce = true;
+          ref.set(state);
+          setSyncStatus(true, "실시간 동기화됨");
+        }
+      }, function () {
+        setSyncStatus(false, "동기화 연결 실패 (오프라인 모드)");
+      });
+    });
+  }
+
   function fmt(n) { n = Number(n) || 0; return Math.round(n).toLocaleString("ko-KR"); }
   function fmt1(n) { n = Number(n) || 0; return (Math.round(n * 10) / 10).toLocaleString("ko-KR"); }
   function todayStr() {
@@ -3263,6 +3343,15 @@
   }
 
   function persist(cb) {
+    if (firebaseDb) {
+      firebaseDb.ref("state").set(state).then(function () {
+        cb(true);
+      }).catch(function () {
+        showToast("저장에 실패했어요. 인터넷 연결을 확인해주세요");
+        cb(false);
+      });
+      return;
+    }
     if (!artifactApi) { cb(true); return; }
     artifactApi.publish(renderFullDocument(state)).then(function () {
       cb(true);
@@ -3308,6 +3397,8 @@
     renderInputView();
     renderDashView();
     initDashDelegation();
+
+    initFirebaseSync(); // shared cross-device storage; falls back gracefully below if it can't load (e.g. blocked network)
 
     if (window.claude && typeof window.claude.use === "function") {
       window.claude.use("artifact").then(function (api) {
