@@ -434,6 +434,16 @@
     font-size: 13px; font-weight: 700; padding: 10px; border-radius: 10px; cursor: pointer; margin-bottom: 16px;
   }
 
+  .work-area-block { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .work-area-block-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px;
+  }
+  .work-area-remove {
+    border: 1px solid var(--border); background: var(--surface); color: var(--bad);
+    font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+  }
+
   .auth-tabs { display: flex; gap: 6px; margin-bottom: 16px; }
   .auth-tabs button {
     flex: 1; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
@@ -974,19 +984,31 @@
     });
     return rowsToCsv(rows);
   }
+  function entryHasSite(e, site) {
+    return (e.workAreas || []).some(function (w) { return w.site === site; });
+  }
   function logEntriesCsv(st, dateFilter, teamFilter, siteFilter) {
     var entries = st.entries
       .filter(function (e) { return dateFilterMatches(dateFilter === undefined ? "all" : dateFilter, e.date); })
       .filter(function (e) { return !teamFilter || teamFilter === "all" || e.team === teamFilter; })
-      .filter(function (e) { return !siteFilter || siteFilter === "all" || e.site === siteFilter; });
+      .filter(function (e) { return !siteFilter || siteFilter === "all" || entryHasSite(e, siteFilter); });
     var header = ["일자", "팀", "작업자아이디", "작업자이름", "작성자직종", "관리자수", "계장공수", "유도원수", "인원",
       "팀 공수(그날, 공수캘린더 합계)", "현장", "층", "위치", "Anchor", "DuctChannel", "Duct", "Fitting", "전선관Channel", "전선관Pipe",
       "케이블제단", "케이블포설", "케이블결선", "Instrument", "Y카드", "Y카드사유", "재작업", "불량수량", "불량유형", "비고",
       "명일작업구역", "명일층", "명일열수", "명일룸명", "명일작업내용"];
     var rows = [header];
     var mandayIdx = mandayIndexByTeamDate(st.mandayLog);
+    var personnelIdx = personnelIndexByTeamDate(st.mandayLog);
     entries.forEach(function (e) {
-      var roles = e.roles || {};
+      var workAreas = e.workAreas || [];
+      var pKey = personnelIdx[e.team + "|" + e.date] || { personnel: 0, roles: { manager: 0, supervisor: 0, guide: 0 } };
+      var instOther = e.instrumentOther || {};
+      function sumArea(field, key) {
+        return workAreas.reduce(function (s, w) { return s + ((w[field] && w[field][key]) || 0); }, 0);
+      }
+      function joinArea(field) {
+        return workAreas.map(function (w) { return w[field] || ""; }).filter(Boolean).join("; ");
+      }
       var npList = Array.isArray(e.nextDayPlan) ? e.nextDayPlan : (e.nextDayPlan ? [e.nextDayPlan] : []);
       function npJoin(field, sep) {
         return npList.map(function (p) { return p[field] || ""; }).filter(Boolean).join(sep || "; ");
@@ -994,12 +1016,12 @@
       var acct = getAccount(st, e.workerId);
       rows.push([
         e.date, e.team, e.workerId || "", (acct && acct.name) || "", e.role || "",
-        roles.manager || 0, roles.supervisor || 0, roles.guide || 0, e.personnel || 0, mandayIdx[e.team + "|" + e.date] || 0,
-        e.site || "", e.floor || "", formatLocation(e),
-        (e.duct && e.duct.anchor) || 0, (e.duct && e.duct.channel) || 0, (e.duct && e.duct.duct) || 0, (e.duct && e.duct.fitting) || 0,
-        (e.conduit && e.conduit.channel) || 0, (e.conduit && e.conduit.pipe) || 0,
-        (e.cable && e.cable.cut) || 0, (e.cable && e.cable.layout) || 0, (e.cable && e.cable.wire) || 0,
-        (e.instrument && e.instrument.point) || 0, (e.instrument && e.instrument.ycard) || 0, (e.instrument && e.instrument.ycardReason) || "", (e.instrument && e.instrument.rework) || 0,
+        pKey.roles.manager, pKey.roles.supervisor, pKey.roles.guide, pKey.personnel, mandayIdx[e.team + "|" + e.date] || 0,
+        joinArea("site"), joinArea("floor"), formatWorkAreasText(e),
+        sumArea("duct", "anchor"), sumArea("duct", "channel"), sumArea("duct", "duct"), sumArea("duct", "fitting"),
+        sumArea("conduit", "channel"), sumArea("conduit", "pipe"),
+        sumArea("cable", "cut"), sumArea("cable", "layout"), sumArea("cable", "wire"),
+        sumArea("instrument", "point"), instOther.ycard || 0, instOther.ycardReason || "", instOther.rework || 0,
         (e.defect && e.defect.qty) || 0, (e.defect && e.defect.type) || "", e.note || "",
         npJoin("zone"), npJoin("floor"), npJoin("rows"), npJoin("room"), npJoin("content", " / ")
       ]);
@@ -1087,8 +1109,30 @@
     return idx;
   }
   function countableQty(e) {
-    var d = e.duct || {}, ins = e.instrument || {};
-    return (d.anchor || 0) + (d.fitting || 0) + (ins.point || 0) + (ins.ycard || 0);
+    var sum = 0;
+    (e.workAreas || []).forEach(function (w) {
+      var d = w.duct || {}, ins = w.instrument || {};
+      sum += (d.anchor || 0) + (d.fitting || 0) + (ins.point || 0);
+    });
+    sum += (e.instrumentOther && e.instrumentOther.ycard) || 0;
+    return sum;
+  }
+  // 실적 하나에 작업구역(현장~계기 작업)이 여러 개 있을 수 있어서, 팀+날짜별 투입인원/직종 구성은
+  // 이 실적의 personnel/roles가 아니라 mandayLog(팀원 개인 공수 캘린더)에서 그날 그 팀에 기록을 남긴
+  // 사람 수를 센다. personnelIndexByTeamDate()가 그 집계를 담당한다.
+  function personnelIndexByTeamDate(log) {
+    var idx = {};
+    (log || []).forEach(function (r) {
+      var key = r.team + "|" + r.date;
+      if (!idx[key]) idx[key] = { personnel: 0, roles: { manager: 0, supervisor: 0, guide: 0 } };
+      idx[key].personnel += 1;
+      var acct = getAccount(state, r.workerId);
+      var role = acct && acct.role;
+      if (role === "관리자") idx[key].roles.manager += 1;
+      else if (role === "유도원") idx[key].roles.guide += 1;
+      else if (role) idx[key].roles.supervisor += 1;
+    });
+    return idx;
   }
   function monthOf(e) { return (e.date || "").slice(0, 7); }
   function dayOfMonthNum(e) { return parseInt((e.date || "").slice(8, 10), 10); }
@@ -1107,14 +1151,16 @@
   }
   function accumulate(b, e) {
     b.entries += 1;
-    b.personnel += e.personnel || 0;
-    // manHours/workHours는 accumulate()에서 채우지 않는다 — aggregate()/monthlyAggregate() 등에서
+    // personnel/roles/manHours/workHours는 accumulate()에서 채우지 않는다 — aggregate()/monthlyAggregate() 등에서
     // mandayLog(팀원 개인 공수 캘린더) 기준으로 팀·날짜별로 한 번씩만 더한다.
-    ROLE_KEYS.forEach(function (k) { b.roles[k] += (e.roles && e.roles[k]) || 0; });
-    ["anchor", "channel", "duct", "fitting"].forEach(function (k) { b.duct[k] += (e.duct && e.duct[k]) || 0; });
-    ["channel", "pipe"].forEach(function (k) { b.conduit[k] += (e.conduit && e.conduit[k]) || 0; });
-    ["cut", "layout", "wire"].forEach(function (k) { b.cable[k] += (e.cable && e.cable[k]) || 0; });
-    ["point", "ycard", "rework"].forEach(function (k) { b.instrument[k] += (e.instrument && e.instrument[k]) || 0; });
+    (e.workAreas || []).forEach(function (w) {
+      ["anchor", "channel", "duct", "fitting"].forEach(function (k) { b.duct[k] += (w.duct && w.duct[k]) || 0; });
+      ["channel", "pipe"].forEach(function (k) { b.conduit[k] += (w.conduit && w.conduit[k]) || 0; });
+      ["cut", "layout", "wire"].forEach(function (k) { b.cable[k] += (w.cable && w.cable[k]) || 0; });
+      b.instrument.point += (w.instrument && w.instrument.point) || 0;
+    });
+    b.instrument.ycard += (e.instrumentOther && e.instrumentOther.ycard) || 0;
+    b.instrument.rework += (e.instrumentOther && e.instrumentOther.rework) || 0;
     var dq = (e.defect && e.defect.qty) || 0;
     b.defectQty += dq;
     if (dq && e.defect && e.defect.type) { b.defectByType[e.defect.type] = (b.defectByType[e.defect.type] || 0) + dq; }
@@ -1123,6 +1169,17 @@
   function defectRate(b) { return b.countable > 0 ? (b.defectQty / b.countable * 100) : 0; }
   // 인당설치가 아니라 "공수당설치"를 쓴다 — 시공량을 투입인원이 아니라 투입공수(workHours, 환산공수)로 나눈다.
   function perPerson(qty, manHours) { return manHours > 0 ? (qty / manHours) : 0; }
+  // mandayLog 기록 하나(팀원 한 명이 하루치 남긴 공수)를 집계 버킷에 반영한다 — 공수·투입인원·직종구성이 전부 여기서 나온다.
+  function applyMandayRecordToBucket(b, r) {
+    var v = mandayValue(r);
+    b.manHours += v; b.workHours += v;
+    b.personnel += 1;
+    var acct = getAccount(state, r.workerId);
+    var role = acct && acct.role;
+    if (role === "관리자") b.roles.manager += 1;
+    else if (role === "유도원") b.roles.guide += 1;
+    else if (role) b.roles.supervisor += 1;
+  }
 
   function aggregate(teams, entries, mandayFilter) {
     var byTeam = {};
@@ -1136,9 +1193,8 @@
     (state.mandayLog || []).forEach(function (r) {
       if (mandayFilter && !mandayFilter(r)) return;
       if (!byTeam[r.team]) byTeam[r.team] = freshAgg();
-      var v = mandayValue(r);
-      byTeam[r.team].manHours += v; byTeam[r.team].workHours += v;
-      total.manHours += v; total.workHours += v;
+      applyMandayRecordToBucket(byTeam[r.team], r);
+      applyMandayRecordToBucket(total, r);
     });
     return { byTeam: byTeam, total: total };
   }
@@ -1176,8 +1232,7 @@
       if (mandayFilter && !mandayFilter(r)) return;
       var m = (r.date || "").slice(0, 7);
       if (!m || !byMonth[m]) return;
-      var v = mandayValue(r);
-      byMonth[m].manHours += v; byMonth[m].workHours += v;
+      applyMandayRecordToBucket(byMonth[m], r);
     });
     return { months: months, byMonth: byMonth };
   }
@@ -1190,15 +1245,21 @@
     if (!from && !to) return "";
     return prefix + (from === to ? from : from + "~" + to);
   }
-  function formatLocation(e) {
+  // w는 작업구역 하나(현장/층/위치)를 나타내는 객체 — 실적 하나(e)는 workAreas 배열에 여러 개를 담을 수 있다.
+  function formatLocation(w) {
     var parts = [];
-    if (e.site) parts.push(e.site);
-    if (e.floor) parts.push(e.floor);
-    var loc = e.location || {};
+    if (w.site) parts.push(w.site);
+    if (w.floor) parts.push(w.floor);
+    var loc = w.location || {};
     var xy = [rangeStr("X", loc.xFrom, loc.xTo), rangeStr("Y", loc.yFrom, loc.yTo)].filter(Boolean).join(" ");
     if (xy) parts.push(xy);
     if (loc.room) parts.push(loc.room);
     return parts.length ? parts.join(" · ") : "—";
+  }
+  function formatWorkAreasText(e) {
+    var list = e.workAreas || [];
+    if (!list.length) return "—";
+    return list.map(formatLocation).join(" / ");
   }
   function formatNextDayPlanText(e) {
     var raw = e.nextDayPlan;
@@ -1416,6 +1477,51 @@
       (idx > 0 ? '<button type="button" class="next-plan-remove" data-plan-remove="1">✕ 이 구역 삭제</button>' : "") +
     "</div>";
   }
+  // 실적 하나에 작업구역(현장~계기 작업)이 여러 곳일 수 있어서, "현장" 선택부터 "계기 작업" 수량까지를
+  // 한 블록으로 묶어 반복 추가할 수 있게 만든다. 값은 data-role로 찾는다 (같은 id가 여러 개면 안 되니까).
+  function qtyRole(role, label, unit) {
+    return '<div class="qty-item"><label>' + label + '</label><div class="input-unit">' +
+      '<input type="number" min="0" data-role="' + role + '" placeholder="0"><span class="unit">' + unit + '</span></div></div>';
+  }
+  function buildWorkAreaBlockHtml(idx) {
+    var siteO = getSiteOptions(state).map(function (s) {
+      return '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + "</option>";
+    }).join("");
+    var floorO = getFloorOptions(state).map(function (f) {
+      return '<option value="' + escapeHtml(f) + '">' + escapeHtml(f) + "</option>";
+    }).join("");
+    return '<div class="work-area-block" data-area-idx="' + idx + '">' +
+      '<div class="work-area-block-head">작업구역 ' + (idx + 1) +
+        (idx > 0 ? '<button type="button" class="work-area-remove" data-area-remove="1">✕ 삭제</button>' : "") +
+      "</div>" +
+      '<div class="field"><label>현장</label><select data-role="site">' + siteO + "</select></div>" +
+      '<div class="field"><label>층</label><select data-role="floor">' + floorO + "</select></div>" +
+      '<div class="field-row">' +
+        '<div class="field"><label>X열 (기둥기준)</label><div class="range-inputs">' +
+          '<input type="number" data-role="xFrom" placeholder="시작"><span class="range-sep">~</span>' +
+          '<input type="number" data-role="xTo" placeholder="끝">' +
+        "</div></div>" +
+        '<div class="field"><label>Y열 (기둥기준)</label><div class="range-inputs">' +
+          '<input type="number" data-role="yFrom" placeholder="시작"><span class="range-sep">~</span>' +
+          '<input type="number" data-role="yTo" placeholder="끝">' +
+        "</div></div>" +
+      "</div>" +
+      '<div class="field"><label>룸명</label><input type="text" data-role="room" placeholder="예: 전기실"></div>' +
+      '<div class="section-title">Cable Duct 작업<span class="unit-note">Anchor · Channel · Duct · Fitting</span></div>' +
+      '<div class="qty-grid">' +
+        qtyRole("duct-anchor", "Anchor", "point") + qtyRole("duct-channel", "Channel", "M") +
+        qtyRole("duct-duct", "Duct", "M") + qtyRole("duct-fitting", "Fitting", "EA") +
+      "</div>" +
+      '<div class="section-title">전선관 작업<span class="unit-note">Channel · Pipe</span></div>' +
+      '<div class="qty-grid">' + qtyRole("conduit-channel", "Channel", "M") + qtyRole("conduit-pipe", "Pipe", "M") + "</div>" +
+      '<div class="section-title">케이블 작업<span class="unit-note">제단 · 포설 · 결선</span></div>' +
+      '<div class="qty-grid">' +
+        qtyRole("cable-cut", "제단", "M") + qtyRole("cable-layout", "포설", "M") + qtyRole("cable-wire", "결선", "M") +
+      "</div>" +
+      '<div class="section-title">계기 작업<span class="unit-note">Instrument</span></div>' +
+      '<div class="qty-grid">' + qtyRole("inst-point", "Instrument", "point") + "</div>" +
+    "</div>";
+  }
   function buildEntryFormHtml(st) {
     var account = currentAccount();
     if (!account || account.role !== LEAD_ROLE) {
@@ -1441,12 +1547,6 @@
     var opts = teams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === defaultTeam ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
-    var floorOpts = getFloorOptions(st).map(function (f) {
-      return '<option value="' + escapeHtml(f) + '">' + escapeHtml(f) + "</option>";
-    }).join("");
-    var siteOpts = getSiteOptions(st).map(function (s) {
-      return '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + "</option>";
-    }).join("");
     var defectOpts = '<option value="">없음</option>' + getDefectTypeOptions(st).map(function (t) {
       return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
     }).join("");
@@ -1461,47 +1561,11 @@
           storageChipHtml(st) +
           '<div class="field"><label>소속팀</label><select id="fTeam">' + opts + "</select></div>" +
           '<div class="field" id="fTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="fTeamNew" placeholder="예: 박정호팀"></div>' +
-          '<div class="field-row">' +
-            '<div class="field"><label>작업일자</label><input type="date" id="fDate" value="' + todayStr() + '"></div>' +
-            '<div class="field"><label>현장</label><select id="fSite">' + siteOpts + "</select></div>" +
-          "</div>" +
-          '<div class="field"><label>층</label><select id="fFloor">' + floorOpts + "</select></div>" +
+          '<div class="field"><label>작업일자</label><input type="date" id="fDate" value="' + todayStr() + '"></div>' +
 
-          '<div class="section-title">투입인원 구성<span class="unit-note" id="fPersonnelTotal">합계 0명</span></div>' +
-          '<div class="qty-grid">' +
-            qtyInput("fRoleManager", "관리자", "명") + qtyInput("fRoleSupervisor", "계장공", "명") +
-            qtyInput("fRoleGuide", "유도원", "명") +
-          "</div>" +
-          '<div class="field-row">' +
-            '<div class="field"><label>X열 (기둥기준)</label><div class="range-inputs">' +
-              '<input type="number" id="fLocXFrom" placeholder="시작"><span class="range-sep">~</span>' +
-              '<input type="number" id="fLocXTo" placeholder="끝">' +
-            "</div></div>" +
-            '<div class="field"><label>Y열 (기둥기준)</label><div class="range-inputs">' +
-              '<input type="number" id="fLocYFrom" placeholder="시작"><span class="range-sep">~</span>' +
-              '<input type="number" id="fLocYTo" placeholder="끝">' +
-            "</div></div>" +
-          "</div>" +
-          '<div class="field"><label>룸명</label><input type="text" id="fLocRoom" placeholder="예: 전기실"></div>' +
-
-          '<div class="section-title">Cable Duct 작업<span class="unit-note">Anchor · Channel · Duct · Fitting</span></div>' +
-          '<div class="qty-grid">' +
-            qtyInput("qDuctAnchor", "Anchor", "point") + qtyInput("qDuctChannel", "Channel", "M") +
-            qtyInput("qDuctDuct", "Duct", "M") + qtyInput("qDuctFitting", "Fitting", "EA") +
-          "</div>" +
-
-          '<div class="section-title">전선관 작업<span class="unit-note">Channel · Pipe</span></div>' +
-          '<div class="qty-grid">' + qtyInput("qConduitChannel", "Channel", "M") + qtyInput("qConduitPipe", "Pipe", "M") + "</div>" +
-
-          '<div class="section-title">케이블 작업<span class="unit-note">제단 · 포설 · 결선</span></div>' +
-          '<div class="qty-grid">' +
-            qtyInput("qCableCut", "제단", "M") + qtyInput("qCableLayout", "포설", "M") + qtyInput("qCableWire", "결선", "M") +
-          "</div>" +
-
-          '<div class="section-title">계기 작업<span class="unit-note">Instrument</span></div>' +
-          '<div class="qty-grid">' +
-            qtyInput("qInstPoint", "Instrument", "point") +
-          "</div>" +
+          '<div class="section-title">작업구역<span class="unit-note">현장·층·위치·작업량 · 구역이 여러 곳이면 추가할 수 있어요</span></div>' +
+          '<div id="workAreaBlocks">' + buildWorkAreaBlockHtml(0) + "</div>" +
+          '<button type="button" class="next-plan-add-btn" id="btnAddWorkArea">+ 작업구역 추가</button>' +
 
           '<div class="section-title">기타<span class="unit-note">Y카드(Yellow Card) · 재작업</span></div>' +
           '<div class="qty-grid">' +
@@ -1920,14 +1984,16 @@
       "</div>";
     }).join("");
 
+    var recentPersonnelIdx = personnelIndexByTeamDate(st.mandayLog);
     var recentHtml = entries.length ? entries.slice(0, 8).map(function (e) {
       var color = teamColor(teams, e.team);
+      var pKey = recentPersonnelIdx[e.team + "|" + e.date];
       return "<tr>" +
         "<td>" + escapeHtml(e.date) + "</td>" +
         '<td><span class="team-pill" style="background:' + hexToSoft(color) + ";color:" + color + '">' + escapeHtml(e.team) + "</span></td>" +
         "<td>" + escapeHtml(workerLabel(e)) + "</td>" +
-        "<td>" + escapeHtml(formatLocation(e)) + "</td>" +
-        '<td class="num-cell">' + fmt(e.personnel) + "</td>" +
+        "<td>" + escapeHtml(formatWorkAreasText(e)) + "</td>" +
+        '<td class="num-cell">' + fmt(pKey ? pKey.personnel : 0) + "</td>" +
       "</tr>";
     }).join("") : '<tr><td colspan="5"><div class="empty-state">아직 입력된 실적이 없습니다. "현장 입력" 탭에서 첫 실적을 기록해보세요.</div></td></tr>';
 
@@ -2039,14 +2105,16 @@
     if (teamFilter !== "all" && teams.indexOf(teamFilter) < 0) teamFilter = currentLogTeamFilter = "all";
     var allSites = [];
     var seenSite = {};
-    st.entries.forEach(function (e) { if (e.site && !seenSite[e.site]) { seenSite[e.site] = true; allSites.push(e.site); } });
+    st.entries.forEach(function (e) {
+      (e.workAreas || []).forEach(function (w) { if (w.site && !seenSite[w.site]) { seenSite[w.site] = true; allSites.push(w.site); } });
+    });
     allSites.sort();
     if (siteFilter !== "all" && allSites.indexOf(siteFilter) < 0) siteFilter = currentLogSiteFilter = "all";
 
     var entries = st.entries
       .filter(function (e) { return dateFilterMatches(dateFilter, e.date); })
       .filter(function (e) { return teamFilter === "all" || e.team === teamFilter; })
-      .filter(function (e) { return siteFilter === "all" || e.site === siteFilter; });
+      .filter(function (e) { return siteFilter === "all" || entryHasSite(e, siteFilter); });
     var agg = aggregate(teams, entries, function (r) {
       return dateFilterMatches(dateFilter, r.date) && (teamFilter === "all" || r.team === teamFilter);
     });
@@ -2069,21 +2137,25 @@
       kpiTile("불량수량", fmt(t.defectQty), "건") +
     "</div>";
 
+    var logMandayIdx = mandayIndexByTeamDate(st.mandayLog);
+    var logPersonnelIdx = personnelIndexByTeamDate(st.mandayLog);
     var rowsHtml = entries.length ? entries.slice(0, 50).map(function (e) {
       var color = teamColor(teams, e.team);
       var defectTxt = e.defect && e.defect.qty ? fmt(e.defect.qty) + (e.defect.type ? " (" + escapeHtml(e.defect.type) + ")" : "") : "—";
-      var ycardTxt = e.instrument && e.instrument.ycard ?
-        '<div class="ycard-note">🟡 Y카드 ' + fmt(e.instrument.ycard) + "건" + (e.instrument.ycardReason ? " — " + escapeHtml(e.instrument.ycardReason) : "") + "</div>" : "";
-      var roles = e.roles || {};
-      var roleTxt = ROLE_KEYS.map(function (k) { return (roles[k] || 0) ? ROLE_LABELS[k] + " " + roles[k] : ""; }).filter(Boolean).join(" · ") || "—";
+      var instOther = e.instrumentOther || {};
+      var ycardTxt = instOther.ycard ?
+        '<div class="ycard-note">🟡 Y카드 ' + fmt(instOther.ycard) + "건" + (instOther.ycardReason ? " — " + escapeHtml(instOther.ycardReason) : "") + "</div>" : "";
+      var pKey = logPersonnelIdx[e.team + "|" + e.date] || { personnel: 0, roles: { manager: 0, supervisor: 0, guide: 0 } };
+      var roleTxt = ROLE_KEYS.map(function (k) { return (pKey.roles[k] || 0) ? ROLE_LABELS[k] + " " + pKey.roles[k] : ""; }).filter(Boolean).join(" · ") || "—";
+      var cableLayoutSum = (e.workAreas || []).reduce(function (s, w) { return s + ((w.cable && w.cable.layout) || 0); }, 0);
       return "<tr>" +
         "<td>" + escapeHtml(e.date) + " " + shiftPillHtml(e) + "</td>" +
         '<td><span class="team-pill" style="background:' + hexToSoft(color) + ";color:" + color + '">' + escapeHtml(e.team) + "</span></td>" +
         "<td>" + escapeHtml(workerLabel(e)) + "</td>" +
-        "<td>" + escapeHtml(formatLocation(e)) + "</td>" +
-        '<td class="num-cell">' + fmt(e.personnel) + '<div class="role-breakdown">' + escapeHtml(roleTxt) + "</div></td>" +
-        '<td class="num-cell">' + fmt(e.manHours) + "</td>" +
-        '<td class="num-cell">' + fmt((e.cable && e.cable.layout) || 0) + "</td>" +
+        "<td>" + escapeHtml(formatWorkAreasText(e)) + "</td>" +
+        '<td class="num-cell">' + fmt(pKey.personnel) + '<div class="role-breakdown">' + escapeHtml(roleTxt) + "</div></td>" +
+        '<td class="num-cell">' + fmt(logMandayIdx[e.team + "|" + e.date] || 0) + "</td>" +
+        '<td class="num-cell">' + fmt(cableLayoutSum) + "</td>" +
         "<td>" + defectTxt + "</td>" +
         "<td>" + escapeHtml(e.note || "") + ycardTxt + formatNextDayPlanHtml(e) + "</td>" +
         '<td><button type="button" class="row-edit-btn" data-edit-entry="' + e.id + '">✎ 수정</button></td>' +
@@ -2161,8 +2233,7 @@
       if (!dd) return;
       if (!out[r.team]) out[r.team] = {};
       if (!out[r.team][dd]) out[r.team][dd] = freshAgg();
-      var v = mandayValue(r);
-      out[r.team][dd].manHours += v; out[r.team][dd].workHours += v;
+      applyMandayRecordToBucket(out[r.team][dd], r);
     });
     return out;
   }
@@ -2392,8 +2463,7 @@
     (state.mandayLog || []).forEach(function (r) {
       if (r.team !== team) return;
       if (!dateFilterMatches(dateFilterValue, r.date)) return;
-      var v = mandayValue(r);
-      out.manHours += v; out.workHours += v;
+      applyMandayRecordToBucket(out, r);
     });
     return out;
   }
@@ -2901,13 +2971,6 @@
   }
 
   // ================= render + wire-up =================
-  function updatePersonnelTotal() {
-    var el = document.getElementById("fPersonnelTotal");
-    if (!el) return;
-    var total = num("fRoleManager") + num("fRoleSupervisor") + num("fRoleGuide");
-    el.textContent = "합계 " + fmt(total) + "명";
-  }
-
   function renderInputView() {
     document.getElementById("viewInput").innerHTML = buildInputViewHtml(state);
 
@@ -2948,8 +3011,18 @@
     document.getElementById("fTeam").addEventListener("change", function () {
       document.getElementById("fTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
     });
-    ["fRoleManager", "fRoleSupervisor", "fRoleGuide"].forEach(function (id) {
-      document.getElementById(id).addEventListener("input", updatePersonnelTotal);
+    var addWorkAreaBtn = document.getElementById("btnAddWorkArea");
+    if (addWorkAreaBtn) addWorkAreaBtn.addEventListener("click", function () {
+      var container = document.getElementById("workAreaBlocks");
+      var idx = container.querySelectorAll(".work-area-block").length;
+      container.insertAdjacentHTML("beforeend", buildWorkAreaBlockHtml(idx));
+    });
+    var workAreaContainer = document.getElementById("workAreaBlocks");
+    if (workAreaContainer) workAreaContainer.addEventListener("click", function (ev) {
+      if (ev.target && ev.target.getAttribute("data-area-remove")) {
+        var block = ev.target.closest(".work-area-block");
+        if (block) block.parentNode.removeChild(block);
+      }
     });
     var addNextPlanBtn = document.getElementById("btnAddNextPlan");
     if (addNextPlanBtn) addNextPlanBtn.addEventListener("click", function () {
@@ -3956,7 +4029,6 @@
     if (!editingEntryId) return;
     var e = state.entries.filter(function (x) { return x.id === editingEntryId; })[0];
     if (!e) return;
-    var roles = e.roles || { manager: 0, supervisor: 0, guide: 0 };
     var roleOpts = ROLE_OPTIONS.map(function (r) {
       return '<option value="' + r + '"' + (r === e.role ? " selected" : "") + '>' + r + "</option>";
     }).join("");
@@ -3977,12 +4049,6 @@
         '<div class="field"><label>작성자 직종</label><select id="emRole">' + roleOpts + "</select></div>" +
         '<div class="field"><label>소속팀</label><select id="emTeam">' + teamOpts + "</select></div>" +
         '<div class="field"><label>근무형태</label><select id="emShift">' + shiftOpts + "</select></div>" +
-        '<div class="section-title">투입인원 구성</div>' +
-        '<div class="qty-grid">' +
-          qtyInputVal("emRoleManager", "관리자", "명", roles.manager) +
-          qtyInputVal("emRoleSupervisor", "계장공", "명", roles.supervisor) +
-          qtyInputVal("emRoleGuide", "유도원", "명", roles.guide) +
-        "</div>" +
         '<div class="modal-actions">' +
           '<button type="button" class="btn-secondary" id="emCancel">취소</button>' +
           '<button type="button" class="submit-btn" id="emSave" style="margin-top:0">저장</button>' +
@@ -3992,13 +4058,10 @@
     document.getElementById("emCancel").addEventListener("click", closeEditModal);
     overlay.addEventListener("click", function (ev) { if (ev.target === overlay) closeEditModal(); });
     document.getElementById("emSave").addEventListener("click", function () {
-      var roles2 = { manager: numVal("emRoleManager"), supervisor: numVal("emRoleSupervisor"), guide: numVal("emRoleGuide") };
       e.workerId = document.getElementById("emWorkerId").value.trim();
       e.role = document.getElementById("emRole").value;
       e.team = document.getElementById("emTeam").value;
       e.shift = document.getElementById("emShift").value;
-      e.roles = roles2;
-      e.personnel = roles2.manager + roles2.supervisor + roles2.guide;
       closeEditModal();
       persist(function (ok) {
         if (ok) { showToast("수정됐어요"); renderDashView(); }
@@ -4027,24 +4090,32 @@
       if (state.teams.indexOf(team) < 0) state.teams.push(team);
     }
 
+    var workAreas = Array.prototype.slice.call(document.querySelectorAll("#workAreaBlocks .work-area-block")).map(function (block) {
+      function bv(role) { var el = block.querySelector('[data-role="' + role + '"]'); return el ? el.value : ""; }
+      function bn(role) { var v = parseFloat(bv(role)); return isNaN(v) ? 0 : v; }
+      return {
+        site: bv("site"),
+        floor: bv("floor"),
+        location: {
+          xFrom: bn("xFrom"), xTo: bn("xTo"), yFrom: bn("yFrom"), yTo: bn("yTo"),
+          room: (bv("room") || "").trim()
+        },
+        duct: { anchor: bn("duct-anchor"), channel: bn("duct-channel"), duct: bn("duct-duct"), fitting: bn("duct-fitting") },
+        conduit: { channel: bn("conduit-channel"), pipe: bn("conduit-pipe") },
+        cable: { cut: bn("cable-cut"), layout: bn("cable-layout"), wire: bn("cable-wire") },
+        instrument: { point: bn("inst-point") }
+      };
+    });
+
     var entry = {
       id: uid(), team: team, workerId: workerId, role: role,
       date: document.getElementById("fDate").value || todayStr(),
       shift: "day",
-      site: document.getElementById("fSite").value,
-      floor: document.getElementById("fFloor").value.trim(),
-      location: {
-        xFrom: num("fLocXFrom"), xTo: num("fLocXTo"),
-        yFrom: num("fLocYFrom"), yTo: num("fLocYTo"),
-        room: document.getElementById("fLocRoom").value.trim()
-      },
-      roles: { manager: num("fRoleManager"), supervisor: num("fRoleSupervisor"), guide: num("fRoleGuide") },
-      personnel: num("fRoleManager") + num("fRoleSupervisor") + num("fRoleGuide"),
+      workAreas: workAreas,
+      roles: { manager: 0, supervisor: 0, guide: 0 },
+      personnel: 0,
       manHours: 0,
-      duct: { anchor: num("qDuctAnchor"), channel: num("qDuctChannel"), duct: num("qDuctDuct"), fitting: num("qDuctFitting") },
-      conduit: { channel: num("qConduitChannel"), pipe: num("qConduitPipe") },
-      cable: { cut: num("qCableCut"), layout: num("qCableLayout"), wire: num("qCableWire") },
-      instrument: { point: num("qInstPoint"), ycard: num("qInstYcard"), rework: num("qInstRework"), ycardReason: document.getElementById("qInstYcardReason").value.trim() },
+      instrumentOther: { ycard: num("qInstYcard"), rework: num("qInstRework"), ycardReason: document.getElementById("qInstYcardReason").value.trim() },
       defect: { qty: num("fDefectQty"), type: document.getElementById("fDefectType").value },
       note: document.getElementById("fNote").value.trim(),
       nextDayPlan: role === LEAD_ROLE ? Array.prototype.slice.call(document.querySelectorAll("#nextPlanBlocks .next-plan-block")).map(function (block) {
