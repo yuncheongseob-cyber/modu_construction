@@ -943,7 +943,7 @@
       .filter(function (e) { return dateFilterMatches(dateFilter === undefined ? "all" : dateFilter, e.date); })
       .filter(function (e) { return !teamFilter || teamFilter === "all" || e.team === teamFilter; })
       .filter(function (e) { return !siteFilter || siteFilter === "all" || e.site === siteFilter; });
-    var header = ["일자", "근무형태", "팀", "작업자아이디", "작성자직종", "관리자수", "계장공수", "유도원수", "인원",
+    var header = ["일자", "근무형태", "팀", "작업자아이디", "작업자이름", "작성자직종", "관리자수", "계장공수", "유도원수", "인원",
       "공수(입력값)", "현장", "층", "위치", "Anchor", "DuctChannel", "Duct", "Fitting", "전선관Channel", "전선관Pipe",
       "케이블제단", "케이블포설", "케이블결선", "Instrument", "Y카드", "Y카드사유", "재작업", "불량수량", "불량유형", "비고",
       "명일작업구역", "명일층", "명일열수", "명일룸명", "명일작업내용"];
@@ -951,8 +951,9 @@
     entries.forEach(function (e) {
       var roles = e.roles || {};
       var np = e.nextDayPlan || {};
+      var acct = getAccount(st, e.workerId);
       rows.push([
-        e.date, SHIFT_LABELS[e.shift] || e.shift, e.team, e.workerId || "", e.role || "",
+        e.date, SHIFT_LABELS[e.shift] || e.shift, e.team, e.workerId || "", (acct && acct.name) || "", e.role || "",
         roles.manager || 0, roles.supervisor || 0, roles.guide || 0, e.personnel || 0, e.manHours || 0,
         e.site || "", e.floor || "", formatLocation(e),
         (e.duct && e.duct.anchor) || 0, (e.duct && e.duct.channel) || 0, (e.duct && e.duct.duct) || 0, (e.duct && e.duct.fitting) || 0,
@@ -1150,7 +1151,9 @@
   }
   function workerLabel(e) {
     var id = e.workerId || "—";
-    return e.role ? e.role + " · " + id : id;
+    var account = getAccount(state, e.workerId);
+    var namePart = (account && account.name) ? account.name + "(" + id + ")" : id;
+    return e.role ? e.role + " · " + namePart : namePart;
   }
   function shiftPillHtml(e) {
     var label = SHIFT_LABELS[e.shift] || SHIFT_LABELS.day;
@@ -1264,6 +1267,7 @@
 
     var formHtml = isSignup ?
       ('<div class="field"><label>아이디</label><input type="text" id="authId" placeholder="예: hong123" autocomplete="off"></div>' +
+      '<div class="field"><label>이름</label><input type="text" id="authName" placeholder="예: 홍길동" autocomplete="off"></div>' +
       '<div class="field"><label>비밀번호</label><input type="password" id="authPw" placeholder="4자 이상" autocomplete="new-password"></div>' +
       '<div class="field"><label>비밀번호 확인</label><input type="password" id="authPw2" placeholder="비밀번호를 한번 더 입력" autocomplete="new-password"></div>' +
       '<div class="field"><label>휴대폰 번호</label><input type="tel" id="authPhone" placeholder="예: 01012345678" autocomplete="off"></div>' +
@@ -1309,7 +1313,7 @@
 
   function buildAccountBarHtml(account) {
     return '<div class="account-bar">' +
-      '<span class="account-bar-id">👤 <b>' + escapeHtml(account.workerId) + '</b></span>' +
+      '<span class="account-bar-id">👤 <b>' + escapeHtml(account.name || account.workerId) + '</b> (' + escapeHtml(account.workerId) + ')</span>' +
       '<span class="account-bar-meta">' + escapeHtml(account.role || "") + " · " + escapeHtml(account.team || "") + "</span>" +
       '<span style="flex:1"></span>' +
       '<button type="button" class="account-bar-btn" id="btnMyInfo">내 정보</button>' +
@@ -2437,7 +2441,9 @@
           if (v) sum += Number(v);
           return '<td class="num">' + (v ? fmt1(v) : "–") + "</td>";
         }).join("");
-        return '<tr><td class="rowlabel">' + escapeHtml(wid) + "</td>" + cells + '<td class="num" style="font-weight:700">' + fmt1(sum) + "</td></tr>";
+        var wAcc = getAccount(state, wid);
+        var widLabel = (wAcc && wAcc.name) ? wAcc.name + "(" + wid + ")" : wid;
+        return '<tr><td class="rowlabel">' + escapeHtml(widLabel) + "</td>" + cells + '<td class="num" style="font-weight:700">' + fmt1(sum) + "</td></tr>";
       }).join("");
 
       var teamTotal = dayCols.reduce(function (s, dd) { return s + calSumByDay[dd]; }, 0);
@@ -2543,8 +2549,10 @@
       var dur = r.clockOutAt ? (r.clockOutAt - r.clockInAt) : null;
       if (dur) totalMs += dur; else openCount++;
       var statusHtml = r.clockOutAt ? '<span class="att-status-pill done">퇴근완료</span>' : '<span class="att-status-pill open">근무중</span>';
+      var wAccount = getAccount(state, r.workerId);
+      var wLabel = (wAccount && wAccount.name) ? wAccount.name + "(" + r.workerId + ")" : r.workerId;
       return '<tr>' +
-        '<td class="rowlabel">' + escapeHtml(r.workerId) + "</td>" +
+        '<td class="rowlabel">' + escapeHtml(wLabel) + "</td>" +
         "<td>" + escapeHtml(r.team) + "</td>" +
         '<td class="num">' + fmtHM(r.clockInAt) + "</td>" +
         "<td>" + attVerifyCellHtml(r.clockInLoc, r.clockInPhoto) + "</td>" +
@@ -2608,7 +2616,9 @@
           if (v) sum += v;
           return '<td class="num">' + (v ? fmt1(v) : "–") + "</td>";
         }).join("");
-        return '<tr><td class="rowlabel">' + escapeHtml(wid) + "</td>" + cells + '<td class="num" style="font-weight:700">' + fmt1(sum) + "</td></tr>";
+        var wAcc = getAccount(state, wid);
+        var widLabel = (wAcc && wAcc.name) ? wAcc.name + "(" + wid + ")" : wid;
+        return '<tr><td class="rowlabel">' + escapeHtml(widLabel) + "</td>" + cells + '<td class="num" style="font-weight:700">' + fmt1(sum) + "</td></tr>";
       }).join("");
       var teamTotal = workers.reduce(function (s, wid) {
         return s + dayCols.reduce(function (s2, dd) { return s2 + (byTeam[team][wid][dd] || 0); }, 0);
@@ -3138,6 +3148,7 @@
 
   function doSignup() {
     var id = document.getElementById("authId").value.trim();
+    var name = document.getElementById("authName").value.trim();
     var pw = document.getElementById("authPw").value;
     var pw2 = document.getElementById("authPw2").value;
     var phone = document.getElementById("authPhone").value.trim();
@@ -3146,6 +3157,7 @@
     var team = teamSel;
     if (!id) { authError = "아이디를 입력해주세요"; renderInputView(); return; }
     if (getAccount(state, id)) { authError = "이미 사용 중인 아이디예요"; renderInputView(); return; }
+    if (!name) { authError = "이름을 입력해주세요"; renderInputView(); return; }
     if (!pw || pw.length < 4) { authError = "비밀번호는 4자 이상으로 입력해주세요"; renderInputView(); return; }
     if (pw !== pw2) { authError = "비밀번호가 서로 달라요"; renderInputView(); return; }
     if (!phone) { authError = "휴대폰 번호를 입력해주세요"; renderInputView(); return; }
@@ -3157,7 +3169,7 @@
     authBusy = true; authError = ""; renderInputView();
     hashPassword(id, pw).then(function (hash) {
       if (!state.accounts) state.accounts = {};
-      state.accounts[id] = { workerId: id, passwordHash: hash, phone: phone, role: role, team: team, createdAt: Date.now() };
+      state.accounts[id] = { workerId: id, name: name, passwordHash: hash, phone: phone, role: role, team: team, createdAt: Date.now() };
       if (state.teams.indexOf(team) < 0) state.teams.push(team);
       persist(function (ok) {
         authBusy = false;
@@ -3189,6 +3201,7 @@
     overlay.innerHTML =
       '<div class="modal-card">' +
         "<h3>내 정보 · " + escapeHtml(account.workerId) + "</h3>" +
+        '<div class="field"><label>이름</label><input type="text" id="miName" value="' + escapeHtml(account.name || "") + '" placeholder="예: 홍길동"></div>' +
         '<div class="field"><label>직종</label><select id="miRole">' + roleOpts + "</select></div>" +
         '<div class="field"><label>소속팀</label><select id="miTeam">' + teamOpts + "</select></div>" +
         '<div class="field" id="miTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="miTeamNew" placeholder="예: 박정호팀"></div>' +
@@ -3213,6 +3226,9 @@
         if (!nv) { showToast("새 팀 이름을 입력해주세요"); return; }
         newTeam = nv;
       }
+      var newName = document.getElementById("miName").value.trim();
+      if (!newName) { showToast("이름을 입력해주세요"); return; }
+      account.name = newName;
       account.role = newRole;
       account.team = newTeam;
       account.phone = document.getElementById("miPhone").value.trim();
@@ -3497,11 +3513,12 @@
     if (!dayRecords.length) { showToast("이 날짜에는 출퇴근 기록이 없어요"); return; }
     ensureXlsx(function (ok) {
       if (!ok) { showToast("엑셀 기능을 불러오지 못했어요. 인터넷 연결을 확인해주세요"); return; }
-      var rows = [["작업자", "소속팀", "출근", "출근확인", "퇴근", "퇴근확인", "근무시간", "상태"]];
+      var rows = [["작업자아이디", "이름", "소속팀", "출근", "출근확인", "퇴근", "퇴근확인", "근무시간", "상태"]];
       dayRecords.forEach(function (r) {
         var dur = r.clockOutAt ? (r.clockOutAt - r.clockInAt) : null;
+        var acct = getAccount(state, r.workerId);
         rows.push([
-          r.workerId, r.team, fmtHM(r.clockInAt), attVerifyLabel(r.clockInLoc, r.clockInPhoto),
+          r.workerId, (acct && acct.name) || "", r.team, fmtHM(r.clockInAt), attVerifyLabel(r.clockInLoc, r.clockInPhoto),
           r.clockOutAt ? fmtHM(r.clockOutAt) : "-",
           r.clockOutAt ? attVerifyLabel(r.clockOutLoc, r.clockOutPhoto) : "-",
           dur ? fmtDurationMs(dur) : "-",
@@ -3509,7 +3526,7 @@
         ]);
       });
       var ws = XLSX.utils.aoa_to_sheet(rows);
-      ws["!cols"] = [{ wch: 14 }, { wch: 12 }, { wch: 9 }, { wch: 10 }, { wch: 9 }, { wch: 10 }, { wch: 12 }, { wch: 10 }];
+      ws["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 9 }, { wch: 10 }, { wch: 9 }, { wch: 10 }, { wch: 12 }, { wch: 10 }];
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "출퇴근");
       var wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
