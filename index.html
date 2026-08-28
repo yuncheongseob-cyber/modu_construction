@@ -3018,7 +3018,39 @@
       "</div>" +
       '<div class="storage-track"><div class="storage-fill ' + s.level + '" style="width:' + Math.max(2, Math.round(s.pct)) + '%"></div></div>' +
       '<div class="storage-note">Firebase 무료 요금제 안에서 안전하게 쓸 수 있도록 200MB로 한도를 설정해뒀어요 (사진 약 700~1,000장 수준). 한도에 가까워지면 Firebase 유료 요금제(Blaze)로 올리거나 오래된 사진을 정리해주세요.</div>' +
+    "</div>" +
+    '<div class="panel storage-panel" style="border-color:var(--bad)">' +
+      '<h2 style="margin:0 0 6px;color:var(--bad)">⚠️ 위험 구역</h2>' +
+      '<div class="panel-caption" style="margin:0 0 12px">임시로 넣어둔 예시 데이터를 지우고 새로 시작할 때 써주세요. 아래 버튼을 누르면 <b>모든 작업자·관리자 계정, 실적 기록, 공수 캘린더, 출퇴근 기록</b>이 전부 삭제돼요. 현장 목록·항목 설정은 그대로 남아요. 이 작업은 되돌릴 수 없어요.</div>' +
+      '<div class="field-row" style="align-items:flex-end">' +
+        '<div class="field" style="margin:0"><label>확인을 위해 "초기화"를 입력하세요</label><input type="text" id="dangerResetConfirm" placeholder="초기화" autocomplete="off"></div>' +
+        '<button type="button" class="settings-tag-remove" style="margin-top:0;flex:0 0 auto;padding:0 16px;border-color:var(--bad)" id="btnDangerReset">모든 인원·실적 데이터 삭제</button>' +
+      "</div>" +
     "</div>";
+  }
+  function wireStoragePanel() {
+    var btn = document.getElementById("btnDangerReset");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var v = (document.getElementById("dangerResetConfirm").value || "").trim();
+      if (v !== "초기화") { showToast('확인란에 "초기화"를 정확히 입력해주세요'); return; }
+      state.accounts = {};
+      state.entries = [];
+      state.mandayLog = [];
+      state.attendance = [];
+      state.teams = [];
+      (state.sites || []).forEach(function (s) { s.teams = []; });
+      clearLoggedInWorkerId();
+      persist(function (ok) {
+        if (ok) {
+          showToast("모든 작업자·실적 데이터를 삭제했어요");
+          renderInputView();
+          renderDashView();
+        } else {
+          showToast("삭제 저장에 실패했어요. 인터넷 연결을 확인해주세요");
+        }
+      });
+    });
   }
 
   // ---- photo gallery page ----
@@ -3732,6 +3764,7 @@
     }
     wireSettingsPage();
     wireSitesPage();
+    wireStoragePanel();
     var dateSearchInput = document.getElementById("dateFilterSearchInput");
     if (dateSearchInput) {
       dateSearchInput.addEventListener("input", function () {
