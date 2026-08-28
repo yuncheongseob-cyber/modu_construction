@@ -1224,6 +1224,8 @@
   }
 
   function aggregate(teams, entries, mandayFilter) {
+    teams = teams || [];
+    entries = entries || [];
     var byTeam = {};
     teams.forEach(function (t) { byTeam[t] = freshAgg(); });
     var total = freshAgg();
@@ -1242,18 +1244,21 @@
   }
 
   function uniqueDatesDesc(entries) {
+    entries = entries || [];
     var seen = {}, dates = [];
     entries.forEach(function (e) { if (e.date && !seen[e.date]) { seen[e.date] = true; dates.push(e.date); } });
     dates.sort(function (a, b) { return a < b ? 1 : a > b ? -1 : 0; });
     return dates;
   }
   function uniqueMonthsAsc(entries) {
+    entries = entries || [];
     var seen = {}, months = [];
     entries.forEach(function (e) { var m = monthOf(e); if (m && !seen[m]) { seen[m] = true; months.push(m); } });
     months.sort();
     return months;
   }
   function monthlyAggregate(entries, mandayFilter) {
+    entries = entries || [];
     var months = uniqueMonthsAsc(entries).slice();
     var seenMonth = {};
     months.forEach(function (m) { seenMonth[m] = true; });
@@ -1279,7 +1284,7 @@
     return { months: months, byMonth: byMonth };
   }
   function teamMonthlyAggregate(entries, team) {
-    return monthlyAggregate(entries.filter(function (e) { return e.team === team; }), function (r) { return r.team === team; });
+    return monthlyAggregate((entries || []).filter(function (e) { return e.team === team; }), function (r) { return r.team === team; });
   }
 
   function rangeStr(prefix, from, to) {
@@ -2167,7 +2172,8 @@
   }
 
   function buildLogPageHtml(st, dateFilter) {
-    var teams = st.teams;
+    var teams = st.teams || [];
+    st.entries = st.entries || [];
     var allDates = uniqueDatesDesc(st.entries);
     var teamFilter = currentLogTeamFilter;
     var siteFilter = currentLogSiteFilter;
@@ -2288,6 +2294,7 @@
   function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
   function dailyTeamAggregate(entries, month) {
     // team -> day-of-month(int) -> freshAgg()-shaped bucket
+    entries = entries || [];
     var out = {};
     entries.forEach(function (e) {
       if (monthOf(e) !== month) return;
@@ -2524,6 +2531,7 @@
     return '<div class="date-filter-wrap"><button type="button" class="date-filter-btn" id="teamDateFilterBtn">' + escapeHtml(summary) + ' <span class="caret">▾</span></button>' + panelHtml + "</div>";
   }
   function aggregateEntriesFor(entries, team, dateFilterValue) {
+    entries = entries || [];
     var out = freshAgg();
     entries.forEach(function (e) {
       if (e.team !== team) return;
