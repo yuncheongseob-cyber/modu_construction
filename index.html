@@ -575,6 +575,7 @@
   .modal-card .submit-btn { flex: 1; }
 
   .role-breakdown { font-size: 10.5px; color: var(--text-faint); font-weight: 400; margin-top: 2px; white-space: normal; }
+  .ycard-note { font-size: 10.5px; color: #B58900; font-weight: 600; margin-top: 2px; white-space: normal; }
   .row-edit-btn {
     border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
     font-size: 11px; font-weight: 600; padding: 5px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap;
@@ -917,7 +918,7 @@
       .filter(function (e) { return !siteFilter || siteFilter === "all" || e.site === siteFilter; });
     var header = ["일자", "근무형태", "팀", "작업자아이디", "작성자직종", "관리자수", "계장공수", "유도원수", "인원",
       "공수(입력값)", "현장", "층", "위치", "Anchor", "DuctChannel", "Duct", "Fitting", "전선관Channel", "전선관Pipe",
-      "케이블제단", "케이블포설", "케이블결선", "Instrument", "Y카드", "재작업", "불량수량", "불량유형", "비고",
+      "케이블제단", "케이블포설", "케이블결선", "Instrument", "Y카드", "Y카드사유", "재작업", "불량수량", "불량유형", "비고",
       "명일작업구역", "명일층", "명일열수", "명일룸명", "명일작업내용"];
     var rows = [header];
     entries.forEach(function (e) {
@@ -930,7 +931,7 @@
         (e.duct && e.duct.anchor) || 0, (e.duct && e.duct.channel) || 0, (e.duct && e.duct.duct) || 0, (e.duct && e.duct.fitting) || 0,
         (e.conduit && e.conduit.channel) || 0, (e.conduit && e.conduit.pipe) || 0,
         (e.cable && e.cable.cut) || 0, (e.cable && e.cable.layout) || 0, (e.cable && e.cable.wire) || 0,
-        (e.instrument && e.instrument.point) || 0, (e.instrument && e.instrument.ycard) || 0, (e.instrument && e.instrument.rework) || 0,
+        (e.instrument && e.instrument.point) || 0, (e.instrument && e.instrument.ycard) || 0, (e.instrument && e.instrument.ycardReason) || "", (e.instrument && e.instrument.rework) || 0,
         (e.defect && e.defect.qty) || 0, (e.defect && e.defect.type) || "", e.note || "",
         np.zone || "", np.floor || "", np.rows || "", np.room || "", np.content || ""
       ]);
@@ -1312,10 +1313,11 @@
             qtyInput("qInstPoint", "Instrument", "point") +
           "</div>" +
 
-          '<div class="section-title">기타<span class="unit-note">Y카드 · 재작업</span></div>' +
+          '<div class="section-title">기타<span class="unit-note">Y카드(Yellow Card) · 재작업</span></div>' +
           '<div class="qty-grid">' +
             qtyInput("qInstYcard", "Y카드", "EA") + qtyInput("qInstRework", "재작업", "point") +
           "</div>" +
+          '<div class="field"><label>Y카드 사유</label><input type="text" id="qInstYcardReason" placeholder="예: 배선 오류로 재검사 요청"></div>' +
 
           '<div class="section-title">품질 · 비고</div>' +
           '<div class="field-row">' +
@@ -1892,6 +1894,8 @@
     var rowsHtml = entries.length ? entries.slice(0, 50).map(function (e) {
       var color = teamColor(teams, e.team);
       var defectTxt = e.defect && e.defect.qty ? fmt(e.defect.qty) + (e.defect.type ? " (" + escapeHtml(e.defect.type) + ")" : "") : "—";
+      var ycardTxt = e.instrument && e.instrument.ycard ?
+        '<div class="ycard-note">🟡 Y카드 ' + fmt(e.instrument.ycard) + "건" + (e.instrument.ycardReason ? " — " + escapeHtml(e.instrument.ycardReason) : "") + "</div>" : "";
       var roles = e.roles || {};
       var roleTxt = ROLE_KEYS.map(function (k) { return (roles[k] || 0) ? ROLE_LABELS[k] + " " + roles[k] : ""; }).filter(Boolean).join(" · ") || "—";
       return "<tr>" +
@@ -1903,7 +1907,7 @@
         '<td class="num-cell">' + fmt(e.manHours) + "</td>" +
         '<td class="num-cell">' + fmt((e.cable && e.cable.layout) || 0) + "</td>" +
         "<td>" + defectTxt + "</td>" +
-        "<td>" + escapeHtml(e.note || "") + formatNextDayPlanHtml(e) + "</td>" +
+        "<td>" + escapeHtml(e.note || "") + ycardTxt + formatNextDayPlanHtml(e) + "</td>" +
         '<td><button type="button" class="row-edit-btn" data-edit-entry="' + e.id + '">✎ 수정</button></td>' +
       "</tr>";
     }).join("") : '<tr><td colspan="10"><div class="empty-state">' +
@@ -3655,7 +3659,7 @@
       duct: { anchor: num("qDuctAnchor"), channel: num("qDuctChannel"), duct: num("qDuctDuct"), fitting: num("qDuctFitting") },
       conduit: { channel: num("qConduitChannel"), pipe: num("qConduitPipe") },
       cable: { cut: num("qCableCut"), layout: num("qCableLayout"), wire: num("qCableWire") },
-      instrument: { point: num("qInstPoint"), ycard: num("qInstYcard"), rework: num("qInstRework") },
+      instrument: { point: num("qInstPoint"), ycard: num("qInstYcard"), rework: num("qInstRework"), ycardReason: document.getElementById("qInstYcardReason").value.trim() },
       defect: { qty: num("fDefectQty"), type: document.getElementById("fDefectType").value },
       note: document.getElementById("fNote").value.trim(),
       nextDayPlan: role === LEAD_ROLE ? {
