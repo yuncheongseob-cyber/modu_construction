@@ -694,6 +694,7 @@
   var SHIFT_WEIGHT = { dawn: 0.5, day: 1, ot: 0.5, night: 1, allnight: 2 };
   var SHIFT_LABELS = { dawn: "조출 (0.5공수)", day: "주간 (1.0공수)", ot: "연장 (0.5공수)", night: "야간 (1.0공수)", allnight: "철야 (2.0공수)" };
   var SHIFT_ORDER = ["dawn", "day", "ot", "night", "allnight"];
+  var FLOOR_OPTIONS = ["지하1층", "1층", "2층", "3층", "4층", "5층", "6층", "7층"];
   var ROLE_OPTIONS = ["관리자", "계장공", "계장공(팀장)", "유도원"];
   var LEAD_ROLE = "계장공(팀장)"; // only this role can fill in "명일 작업내용" (next-day work plan)
   var DEFECT_TYPES = ["유형1", "유형2", "유형3", "유형4", "유형5", "유형6", "유형7", "유형8", "기타"];
@@ -943,18 +944,19 @@
       .filter(function (e) { return dateFilterMatches(dateFilter === undefined ? "all" : dateFilter, e.date); })
       .filter(function (e) { return !teamFilter || teamFilter === "all" || e.team === teamFilter; })
       .filter(function (e) { return !siteFilter || siteFilter === "all" || e.site === siteFilter; });
-    var header = ["일자", "근무형태", "팀", "작업자아이디", "작업자이름", "작성자직종", "관리자수", "계장공수", "유도원수", "인원",
-      "공수(입력값)", "현장", "층", "위치", "Anchor", "DuctChannel", "Duct", "Fitting", "전선관Channel", "전선관Pipe",
+    var header = ["일자", "팀", "작업자아이디", "작업자이름", "작성자직종", "관리자수", "계장공수", "유도원수", "인원",
+      "팀 공수(그날, 공수캘린더 합계)", "현장", "층", "위치", "Anchor", "DuctChannel", "Duct", "Fitting", "전선관Channel", "전선관Pipe",
       "케이블제단", "케이블포설", "케이블결선", "Instrument", "Y카드", "Y카드사유", "재작업", "불량수량", "불량유형", "비고",
       "명일작업구역", "명일층", "명일열수", "명일룸명", "명일작업내용"];
     var rows = [header];
+    var mandayIdx = mandayIndexByTeamDate(st.mandayLog);
     entries.forEach(function (e) {
       var roles = e.roles || {};
       var np = e.nextDayPlan || {};
       var acct = getAccount(st, e.workerId);
       rows.push([
-        e.date, SHIFT_LABELS[e.shift] || e.shift, e.team, e.workerId || "", (acct && acct.name) || "", e.role || "",
-        roles.manager || 0, roles.supervisor || 0, roles.guide || 0, e.personnel || 0, e.manHours || 0,
+        e.date, e.team, e.workerId || "", (acct && acct.name) || "", e.role || "",
+        roles.manager || 0, roles.supervisor || 0, roles.guide || 0, e.personnel || 0, mandayIdx[e.team + "|" + e.date] || 0,
         e.site || "", e.floor || "", formatLocation(e),
         (e.duct && e.duct.anchor) || 0, (e.duct && e.duct.channel) || 0, (e.duct && e.duct.duct) || 0, (e.duct && e.duct.fitting) || 0,
         (e.conduit && e.conduit.channel) || 0, (e.conduit && e.conduit.pipe) || 0,
@@ -1035,10 +1037,16 @@
   }
 
   // ---------------- domain helpers ----------------
-  function workHours(e) {
-    var w = SHIFT_WEIGHT[e.shift];
-    if (w === undefined) w = SHIFT_WEIGHT.day;
-    return (e.personnel || 0) * w;
+  // 공수(투입/환산공수)는 더 이상 실적 입력에서 직접 받지 않는다 — 팀원 각자가 "내 공수 캘린더"(mandayLog)에
+  // 입력한 값을 팀·날짜별로 모아서 쓴다. mandayValue()/mandayIndexByTeamDate()가 그 집계를 담당한다.
+  function mandayValue(r) { return r.value != null ? r.value : mandayShiftValue(r.shifts); }
+  function mandayIndexByTeamDate(log) {
+    var idx = {};
+    (log || []).forEach(function (r) {
+      var key = r.team + "|" + r.date;
+      idx[key] = (idx[key] || 0) + mandayValue(r);
+    });
+    return idx;
   }
   function countableQty(e) {
     var d = e.duct || {}, ins = e.instrument || {};
@@ -1062,8 +1070,8 @@
   function accumulate(b, e) {
     b.entries += 1;
     b.personnel += e.personnel || 0;
-    b.manHours += e.manHours || 0;
-    b.workHours += workHours(e);
+    // manHours/workHours는 accumulate()에서 채우지 않는다 — aggregate()/monthlyAggregate() 등에서
+    // mandayLog(팀원 개인 공수 캘린더) 기준으로 팀·날짜별로 한 번씩만 더한다.
     ROLE_KEYS.forEach(function (k) { b.roles[k] += (e.roles && e.roles[k]) || 0; });
     ["anchor", "channel", "duct", "fitting"].forEach(function (k) { b.duct[k] += (e.duct && e.duct[k]) || 0; });
     ["channel", "pipe"].forEach(function (k) { b.conduit[k] += (e.conduit && e.conduit[k]) || 0; });
@@ -1078,7 +1086,7 @@
   function upph(b) { return b.workHours > 0 ? (b.countable / b.workHours) : 0; }
   function perPerson(qty, personnel) { return personnel > 0 ? (qty / personnel) : 0; }
 
-  function aggregate(teams, entries) {
+  function aggregate(teams, entries, mandayFilter) {
     var byTeam = {};
     teams.forEach(function (t) { byTeam[t] = freshAgg(); });
     var total = freshAgg();
@@ -1086,6 +1094,13 @@
       if (!byTeam[e.team]) byTeam[e.team] = freshAgg();
       accumulate(byTeam[e.team], e);
       accumulate(total, e);
+    });
+    (state.mandayLog || []).forEach(function (r) {
+      if (mandayFilter && !mandayFilter(r)) return;
+      if (!byTeam[r.team]) byTeam[r.team] = freshAgg();
+      var v = mandayValue(r);
+      byTeam[r.team].manHours += v; byTeam[r.team].workHours += v;
+      total.manHours += v; total.workHours += v;
     });
     return { byTeam: byTeam, total: total };
   }
@@ -1102,8 +1117,16 @@
     months.sort();
     return months;
   }
-  function monthlyAggregate(entries) {
-    var months = uniqueMonthsAsc(entries);
+  function monthlyAggregate(entries, mandayFilter) {
+    var months = uniqueMonthsAsc(entries).slice();
+    var seenMonth = {};
+    months.forEach(function (m) { seenMonth[m] = true; });
+    (state.mandayLog || []).forEach(function (r) {
+      if (mandayFilter && !mandayFilter(r)) return;
+      var m = (r.date || "").slice(0, 7);
+      if (m && !seenMonth[m]) { seenMonth[m] = true; months.push(m); }
+    });
+    months.sort();
     var byMonth = {};
     months.forEach(function (m) { byMonth[m] = freshAgg(); });
     entries.forEach(function (e) {
@@ -1111,10 +1134,17 @@
       if (!m) return;
       accumulate(byMonth[m], e);
     });
+    (state.mandayLog || []).forEach(function (r) {
+      if (mandayFilter && !mandayFilter(r)) return;
+      var m = (r.date || "").slice(0, 7);
+      if (!m || !byMonth[m]) return;
+      var v = mandayValue(r);
+      byMonth[m].manHours += v; byMonth[m].workHours += v;
+    });
     return { months: months, byMonth: byMonth };
   }
   function teamMonthlyAggregate(entries, team) {
-    return monthlyAggregate(entries.filter(function (e) { return e.team === team; }));
+    return monthlyAggregate(entries.filter(function (e) { return e.team === team; }), function (r) { return r.team === team; });
   }
 
   function rangeStr(prefix, from, to) {
@@ -1346,8 +1376,8 @@
     var opts = teams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === defaultTeam ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
-    var shiftOpts = SHIFT_ORDER.map(function (k) {
-      return '<option value="' + k + '">' + SHIFT_LABELS[k] + "</option>";
+    var floorOpts = FLOOR_OPTIONS.map(function (f) {
+      return '<option value="' + f + '">' + f + "</option>";
     }).join("");
     var defectOpts = '<option value="">없음</option>' + DEFECT_TYPES.map(function (t) {
       return '<option value="' + t + '">' + t + "</option>";
@@ -1367,11 +1397,7 @@
             '<div class="field"><label>작업일자</label><input type="date" id="fDate" value="' + todayStr() + '"></div>' +
             '<div class="field"><label>현장</label><select id="fSite"><option value="WLP">WLP</option><option value="WT">WT</option></select></div>' +
           "</div>" +
-          '<div class="field"><label>근무형태</label><select id="fShift">' + shiftOpts + "</select></div>" +
-          '<div class="field-row">' +
-            '<div class="field"><label>층</label><input type="text" id="fFloor" placeholder="1F"></div>' +
-            '<div class="field"><label>공수(입력값)</label><input type="number" id="fManHours" min="0" placeholder="0"></div>' +
-          "</div>" +
+          '<div class="field"><label>층</label><select id="fFloor">' + floorOpts + "</select></div>" +
 
           '<div class="section-title">투입인원 구성<span class="unit-note" id="fPersonnelTotal">합계 0명</span></div>' +
           '<div class="qty-grid">' +
@@ -1425,7 +1451,7 @@
           '<div class="section-title">명일 작업내용<span class="unit-note">내일 예정 작업 계획</span></div>' +
           '<div class="field-row">' +
             '<div class="field"><label>작업구역</label><select id="fNextZone"><option value="">선택 안함</option><option value="WLP">WLP</option><option value="WT">WT</option></select></div>' +
-            '<div class="field"><label>층</label><input type="text" id="fNextFloor" placeholder="1F"></div>' +
+            '<div class="field"><label>층</label><select id="fNextFloor"><option value="">선택 안함</option>' + floorOpts + "</select></div>" +
           "</div>" +
           '<div class="field-row">' +
             '<div class="field"><label>열수</label><input type="text" id="fNextRows" placeholder="예: X10~20"></div>' +
@@ -1959,7 +1985,9 @@
       .filter(function (e) { return dateFilterMatches(dateFilter, e.date); })
       .filter(function (e) { return teamFilter === "all" || e.team === teamFilter; })
       .filter(function (e) { return siteFilter === "all" || e.site === siteFilter; });
-    var agg = aggregate(teams, entries);
+    var agg = aggregate(teams, entries, function (r) {
+      return dateFilterMatches(dateFilter, r.date) && (teamFilter === "all" || r.team === teamFilter);
+    });
     var t = agg.total;
 
     var teamOpts = '<option value="all"' + (teamFilter === "all" ? " selected" : "") + '>전체 팀</option>' +
@@ -2044,7 +2072,7 @@
         buildStatTable(months, rows1) +
       "</div>" +
       '<div class="panel"><div class="panel-head-row"><h2>월별 인시생산량 (UPPH)</h2>' + csvBtnHtml("월별_인시생산량_UPPH") + "</div>" +
-        '<div class="panel-caption">UPPH = 생산수량 ÷ 환산공수 (환산공수 = 인원 × 근무형태별 공수가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
+        '<div class="panel-caption">UPPH = 생산수량 ÷ 환산공수 (환산공수 = "내 공수 캘린더"에 팀원들이 입력한 값의 합, 근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
         buildStatTable(months, rows2) +
       "</div>" +
       '<div class="panel"><div class="panel-head-row"><h2>월별 불량 유형별 집계</h2>' + csvBtnHtml("월별_불량유형별_집계") + "</div>" +
@@ -2066,6 +2094,15 @@
       if (!out[e.team][dd]) out[e.team][dd] = freshAgg();
       accumulate(out[e.team][dd], e);
     });
+    (state.mandayLog || []).forEach(function (r) {
+      if ((r.date || "").slice(0, 7) !== month) return;
+      var dd = parseInt((r.date || "").slice(8, 10), 10);
+      if (!dd) return;
+      if (!out[r.team]) out[r.team] = {};
+      if (!out[r.team][dd]) out[r.team][dd] = freshAgg();
+      var v = mandayValue(r);
+      out[r.team][dd].manHours += v; out[r.team][dd].workHours += v;
+    });
     return out;
   }
   function buildDailyPageHtml(st) {
@@ -2085,12 +2122,14 @@
     var days = daysInMonth(y, mo);
     var byDay = {};
     for (var d = 1; d <= days; d++) byDay[d] = { dawn: 0, day: 0, ot: 0, night: 0, allnight: 0 };
-    st.entries.forEach(function (e) {
-      if (monthOf(e) !== currentDailyMonth) return;
-      var dn = dayOfMonthNum(e);
+    // 근무형태별 인원은 더 이상 실적 입력이 아니라, 팀원이 "내 공수 캘린더"에 직접 남긴 근무형태를 센다.
+    (st.mandayLog || []).forEach(function (r) {
+      if ((r.date || "").slice(0, 7) !== currentDailyMonth) return;
+      var dn = parseInt((r.date || "").slice(8, 10), 10);
       if (!dn || !byDay[dn]) return;
-      var sh = SHIFT_WEIGHT[e.shift] !== undefined ? e.shift : "day";
-      byDay[dn][sh] += e.personnel || 0;
+      (r.shifts || []).forEach(function (sh) {
+        if (byDay[dn][sh] !== undefined) byDay[dn][sh] += 1;
+      });
     });
 
     var dayCols = [];
@@ -2188,18 +2227,18 @@
 
     return toolbarHtml +
       '<div class="panel"><div class="panel-head-row"><h2>' + currentDailyMonth + ' 전체 투입인원</h2>' + csvBtnHtml(currentDailyMonth + "_전체_투입인원") + "</div>" +
-        '<div class="panel-caption">모든 팀을 합친 일자별 총 투입인원입니다.</div>' +
+        '<div class="panel-caption">"내 공수 캘린더"에 그날 근무를 기록한 전체 인원(연인원)입니다.</div>' +
         totalTable +
       "</div>" +
       '<div class="panel"><div class="panel-head-row"><h2>' + currentDailyMonth + ' 근무형태별 투입인원</h2>' + csvBtnHtml(currentDailyMonth + "_근무형태별_투입인원") + "</div>" +
-        '<div class="panel-caption">근무형태별(조출·주간·연장·야간·철야) 투입 인원입니다.</div>' +
+        '<div class="panel-caption">"내 공수 캘린더"에 팀원들이 직접 기록한 근무형태별(조출·주간·연장·야간·철야) 인원입니다.</div>' +
         shiftTable +
       "</div>" +
       '<div class="panel"><div class="panel-head-row"><h2>' + currentDailyMonth + ' 팀별 투입인원</h2>' + csvBtnHtml(currentDailyMonth + "_팀별_투입인원") + "</div>" +
         '<div class="panel-caption">팀별 일자별 투입인원입니다.</div>' +
         teamPersonnelTable +
       "</div>" +
-      '<div class="panel-caption" style="margin:-4px 0 14px">팀별 생산성(일별) — 환산공수 = 인원 × 근무형태별 공수가중치(조출0.5·주간1.0·연장0.5·야간1.0·철야2.0) · UPPH = 생산수량 ÷ 환산공수</div>' +
+      '<div class="panel-caption" style="margin:-4px 0 14px">팀별 생산성(일별) — 환산공수 = "내 공수 캘린더" 합계(근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0) · UPPH = 생산수량 ÷ 환산공수</div>' +
       teamProdHtml;
   }
 
@@ -2290,6 +2329,12 @@
       if (!dateFilterMatches(dateFilterValue, e.date)) return;
       accumulate(out, e);
     });
+    (state.mandayLog || []).forEach(function (r) {
+      if (r.team !== team) return;
+      if (!dateFilterMatches(dateFilterValue, r.date)) return;
+      var v = mandayValue(r);
+      out.manHours += v; out.workHours += v;
+    });
     return out;
   }
   function buildTeamProdPageHtml(st) {
@@ -2323,7 +2368,7 @@
       var groupDefs = [
         { title: "투입 (" + roleLine + ")", items: [
           ["투입인원", fmt(b.personnel), "명"],
-          ["투입공수(입력값)", fmt(b.manHours), "공수"],
+          ["투입공수(공수캘린더 합계)", fmt(b.manHours), "공수"],
           ["환산공수", fmt1(b.workHours), "공수"],
           ["UPPH", fmt1(upph(b)), "개/공수"]
         ] },
@@ -2365,24 +2410,12 @@
     }).join("");
 
     return toolbarHtml +
-      '<div class="panel-caption" style="margin:-4px 0 14px">인당설치 = 해당 월 시공량 ÷ 그 달 투입인원 (Duct·전선관 Pipe·케이블 포설 기준) · 환산공수 = 인원 × 근무형태별 공수가중치(조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
+      '<div class="panel-caption" style="margin:-4px 0 14px">인당설치 = 해당 월 시공량 ÷ 그 달 투입인원 (Duct·전선관 Pipe·케이블 포설 기준) · 환산공수 = "내 공수 캘린더" 합계(근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
       cardsHtml;
   }
 
   // ---- admin manday comparison page ----
   var currentMandayAdminMonth = null;
-  function mandayEntryTotalsByTeamDate(st, month) {
-    // team -> day-of-month(int) -> summed workHours() from 실적 입력 (team-leader submitted entries)
-    var out = {};
-    (st.entries || []).forEach(function (e) {
-      if (monthOf(e) !== month) return;
-      var dd = dayOfMonthNum(e);
-      if (!dd) return;
-      if (!out[e.team]) out[e.team] = {};
-      out[e.team][dd] = (out[e.team][dd] || 0) + workHours(e);
-    });
-    return out;
-  }
 
   function buildMandayAdminPageHtml(st) {
     var log = st.mandayLog || [];
@@ -2413,18 +2446,12 @@
       if (!byTeam[r.team][r.workerId]) byTeam[r.team][r.workerId] = {};
       byTeam[r.team][r.workerId][parseInt(r.date.slice(8, 10), 10)] = r.value;
     });
-    var entryTotals = mandayEntryTotalsByTeamDate(st, currentMandayAdminMonth);
-
-    var teamsWithEntries = {};
-    Object.keys(entryTotals).forEach(function (t) { teamsWithEntries[t] = true; });
-    var teamsInLog = st.teams.filter(function (t) { return byTeam[t] || teamsWithEntries[t]; })
-      .concat(Object.keys(byTeam).filter(function (t) { return st.teams.indexOf(t) < 0; }))
-      .concat(Object.keys(teamsWithEntries).filter(function (t) { return st.teams.indexOf(t) < 0 && !byTeam[t]; }));
+    var teamsInLog = st.teams.filter(function (t) { return byTeam[t]; })
+      .concat(Object.keys(byTeam).filter(function (t) { return st.teams.indexOf(t) < 0; }));
 
     var panelsHtml = teamsInLog.map(function (team) {
       var color = teamColor(st.teams, team);
       var workers = byTeam[team] ? Object.keys(byTeam[team]).sort() : [];
-      var teamEntryByDay = entryTotals[team] || {};
 
       var calSumByDay = {};
       dayCols.forEach(function (dd) {
@@ -2447,35 +2474,31 @@
       }).join("");
 
       var teamTotal = dayCols.reduce(function (s, dd) { return s + calSumByDay[dd]; }, 0);
-      var entryTotal = dayCols.reduce(function (s, dd) { return s + (teamEntryByDay[dd] || 0); }, 0);
 
-      var calRowCells = "", entryRowCells = "";
+      var calRowCells = "";
       dayCols.forEach(function (dd) {
         var calV = calSumByDay[dd];
-        var entV = teamEntryByDay[dd] || 0;
         calRowCells += '<td class="num">' + (calV ? fmt1(calV) : "–") + "</td>";
-        entryRowCells += '<td class="num">' + (entV ? fmt1(entV) : "–") + "</td>";
       });
 
-      var compareRowsHtml =
-        '<tr class="manday-cal-row"><td class="rowlabel">공수캘린더 합계</td>' + calRowCells + '<td class="num" style="font-weight:700">' + fmt1(teamTotal) + "</td></tr>" +
-        '<tr class="manday-entry-row"><td class="rowlabel">실적 환산공수</td>' + entryRowCells + '<td class="num" style="font-weight:700">' + fmt1(entryTotal) + "</td></tr>";
+      var totalRowHtml =
+        '<tr class="manday-cal-row"><td class="rowlabel">합계</td>' + calRowCells + '<td class="num" style="font-weight:700">' + fmt1(teamTotal) + "</td></tr>";
 
       return '<div class="panel">' +
         '<div class="team-panel-head"><span class="dot" style="background:' + color + '"></span><h2 style="margin:0">' + escapeHtml(team) +
-          '</h2><span class="count">· 공수캘린더 합계 ' + fmt1(teamTotal) + "공수</span>" + '<span style="flex:1"></span>' +
+          '</h2><span class="count">· 공수 합계 ' + fmt1(teamTotal) + "공수</span>" + '<span style="flex:1"></span>' +
           csvBtnHtml(escapeHtml(team) + "_" + currentMandayAdminMonth + "_공수표") +
         "</div>" +
-        '<div class="panel-caption" style="margin-bottom:8px">"공수캘린더 합계"는 작업자 개인이 직접 입력한 값, "실적 환산공수"는 팀장이 실적 입력 시 선택한 인원×근무형태로 자동 계산된 값이에요.</div>' +
+        '<div class="panel-caption" style="margin-bottom:8px">작업자 개인이 "내 공수 캘린더"에서 직접 입력한 값이에요. 관리자 대시보드의 "투입공수"·"환산공수"도 이 값을 그대로 사용해요.</div>' +
         '<div class="stat-table-wrap"><table class="stat-table">' +
           "<thead><tr><th class=\"rowlabel\">작업자</th>" + dayCols.map(function (dd) { return "<th>" + dd + "</th>"; }).join("") + "<th>합계</th></tr></thead>" +
-          "<tbody>" + rowsHtml + compareRowsHtml + "</tbody>" +
+          "<tbody>" + rowsHtml + totalRowHtml + "</tbody>" +
         "</table></div>" +
       "</div>";
     }).join("");
 
     return toolbarHtml +
-      '<div class="panel-caption" style="margin:-4px 0 14px">작업자가 "내 공수 캘린더"에서 직접 입력한 값과, 팀장이 "실적 입력"에서 제출한 값을 함께 비교합니다.</div>' +
+      '<div class="panel-caption" style="margin:-4px 0 14px">작업자가 "내 공수 캘린더"에서 직접 입력한 값을 팀별로 모아서 보여줘요.</div>' +
       panelsHtml;
   }
 
@@ -3882,7 +3905,7 @@
     var entry = {
       id: uid(), team: team, workerId: workerId, role: role,
       date: document.getElementById("fDate").value || todayStr(),
-      shift: document.getElementById("fShift").value || "day",
+      shift: "day",
       site: document.getElementById("fSite").value,
       floor: document.getElementById("fFloor").value.trim(),
       location: {
@@ -3892,7 +3915,7 @@
       },
       roles: { manager: num("fRoleManager"), supervisor: num("fRoleSupervisor"), guide: num("fRoleGuide") },
       personnel: num("fRoleManager") + num("fRoleSupervisor") + num("fRoleGuide"),
-      manHours: num("fManHours"),
+      manHours: 0,
       duct: { anchor: num("qDuctAnchor"), channel: num("qDuctChannel"), duct: num("qDuctDuct"), fitting: num("qDuctFitting") },
       conduit: { channel: num("qConduitChannel"), pipe: num("qConduitPipe") },
       cable: { cut: num("qCableCut"), layout: num("qCableLayout"), wire: num("qCableWire") },
