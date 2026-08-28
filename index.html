@@ -722,7 +722,7 @@
   try { state = JSON.parse(stateEl.textContent); } catch (e) { state = null; }
   if (!state || !state.teams) { state = { teams: ["김춘식팀", "이중화팀"], entries: [] }; }
   if (!state.accounts) state.accounts = {};
-  if (!state.sites) state.sites = []; // 현장 관리: {id, name, company, bizRegNo, address, teams:[...], createdAt}
+  if (!state.sites) state.sites = []; // 현장 관리: {id, name, company, address, teams:[...], createdAt}
 
   var TEAM_COLORS = ["#E8630A", "#2E7D4F", "#3B6FB6", "#A8720A", "#8C4FBF", "#C4432B"];
   function teamColor(teams, name) {
@@ -757,13 +757,13 @@
   function authCompanyList(st) {
     var seen = {}, list = [];
     (st.sites || []).forEach(function (s) {
-      var key = (s.company || "") + "" + (s.bizRegNo || "");
-      if (!seen[key]) { seen[key] = true; list.push({ company: s.company || "", bizRegNo: s.bizRegNo || "" }); }
+      var key = s.company || "";
+      if (!seen[key]) { seen[key] = true; list.push({ company: s.company || "" }); }
     });
     return list;
   }
-  function sitesForCompany(st, company, bizRegNo) {
-    return (st.sites || []).filter(function (s) { return (s.company || "") === company && (s.bizRegNo || "") === bizRegNo; });
+  function sitesForCompany(st, company) {
+    return (st.sites || []).filter(function (s) { return (s.company || "") === company; });
   }
   function getDefectTypeOptions(st) { return (st.settings && st.settings.defectTypes && st.settings.defectTypes.length) ? st.settings.defectTypes : DEFAULT_DEFECT_TYPES; }
   function ensureSettingsList(key) {
@@ -1321,6 +1321,13 @@
     var namePart = (account && account.name) ? account.name + "(" + id + ")" : id;
     return e.role ? e.role + " · " + namePart : namePart;
   }
+  // 표에서 이름/아이디를 각각 다른 열에 넣기 위한 헬퍼 (엑셀 정리할 때 편하도록)
+  function workerNameCellHtml(e) {
+    var account = getAccount(state, e.workerId);
+    var name = (account && account.name) ? account.name : "—";
+    var sub = e.role ? '<div class="role-breakdown">' + escapeHtml(e.role) + "</div>" : "";
+    return escapeHtml(name) + sub;
+  }
   function shiftPillHtml(e) {
     var label = SHIFT_LABELS[e.shift] || SHIFT_LABELS.day;
     return '<span class="shift-pill">' + label.replace(" ", "") + '</span>';
@@ -1432,8 +1439,7 @@
     if (hasSites) {
       var companyList = authCompanyList(st);
       var companyOpts = companyList.map(function (c, i) {
-        var label = c.company + (c.bizRegNo ? " (" + c.bizRegNo + ")" : "");
-        return '<option value="' + i + '">' + escapeHtml(label) + "</option>";
+        return '<option value="' + i + '">' + escapeHtml(c.company) + "</option>";
       }).join("");
       siteFieldsHtml =
         '<div class="field"><label>회사명</label><select id="authCompany">' + companyOpts + "</select></div>" +
@@ -2043,11 +2049,12 @@
       return "<tr>" +
         "<td>" + escapeHtml(e.date) + "</td>" +
         '<td><span class="team-pill" style="background:' + hexToSoft(color) + ";color:" + color + '">' + escapeHtml(e.team) + "</span></td>" +
-        "<td>" + escapeHtml(workerLabel(e)) + "</td>" +
+        "<td>" + workerNameCellHtml(e) + "</td>" +
+        "<td>" + escapeHtml(e.workerId || "—") + "</td>" +
         "<td>" + escapeHtml(formatWorkAreasText(e)) + "</td>" +
         '<td class="num-cell">' + fmt(pKey ? pKey.personnel : 0) + "</td>" +
       "</tr>";
-    }).join("") : '<tr><td colspan="5"><div class="empty-state">아직 입력된 실적이 없습니다. "현장 입력" 탭에서 첫 실적을 기록해보세요.</div></td></tr>';
+    }).join("") : '<tr><td colspan="6"><div class="empty-state">아직 입력된 실적이 없습니다. "현장 입력" 탭에서 첫 실적을 기록해보세요.</div></td></tr>';
 
     return kpiHtml + perPersonPanelHtml +
       '<div class="dash-grid">' +
@@ -2057,7 +2064,7 @@
       '<div class="panel">' +
         '<h2>최근 실적 <span class="count">· 최근 8건 · 전체는 실적 로그에서</span></h2>' +
         '<div class="table-scroll"><table>' +
-          "<thead><tr><th>일자</th><th>팀</th><th>작업자</th><th>위치</th><th style=\"text-align:right\">인원</th></tr></thead>" +
+          "<thead><tr><th>일자</th><th>팀</th><th>이름</th><th>아이디</th><th>위치</th><th style=\"text-align:right\">인원</th></tr></thead>" +
           "<tbody>" + recentHtml + "</tbody>" +
         "</table></div>" +
       "</div>";
@@ -2203,7 +2210,8 @@
       return "<tr>" +
         "<td>" + escapeHtml(e.date) + " " + shiftPillHtml(e) + "</td>" +
         '<td><span class="team-pill" style="background:' + hexToSoft(color) + ";color:" + color + '">' + escapeHtml(e.team) + "</span></td>" +
-        "<td>" + escapeHtml(workerLabel(e)) + "</td>" +
+        "<td>" + workerNameCellHtml(e) + "</td>" +
+        "<td>" + escapeHtml(e.workerId || "—") + "</td>" +
         "<td>" + escapeHtml(formatWorkAreasText(e)) + "</td>" +
         '<td class="num-cell">' + fmt(pKey.personnel) + '<div class="role-breakdown">' + escapeHtml(roleTxt) + "</div></td>" +
         '<td class="num-cell">' + fmt(logMandayIdx[e.team + "|" + e.date] || 0) + "</td>" +
@@ -2212,7 +2220,7 @@
         "<td>" + escapeHtml(e.note || "") + ycardTxt + formatNextDayPlanHtml(e) + "</td>" +
         '<td><button type="button" class="row-edit-btn" data-edit-entry="' + e.id + '">✎ 수정</button></td>' +
       "</tr>";
-    }).join("") : '<tr><td colspan="10"><div class="empty-state">' +
+    }).join("") : '<tr><td colspan="11"><div class="empty-state">' +
       (st.entries.length === 0 ? '아직 입력된 실적이 없습니다. "현장 입력" 탭에서 첫 실적을 기록해보세요.' : "선택한 조건(" + dateFilterSummary(allDates, dateFilter) + ")에 해당하는 실적이 없습니다.") +
       "</div></td></tr>";
 
@@ -2223,7 +2231,7 @@
         "</div>" +
         '<div class="panel-caption" style="margin-top:-4px">화면엔 최대 50건만 보이지만, 다운로드는 현재 조회 조건에 해당하는 전체 실적이 담겨요.</div>' +
         '<div class="table-scroll"><table>' +
-          "<thead><tr><th>일자/근무</th><th>팀</th><th>작업자</th><th>위치</th><th style=\"text-align:right\">인원</th><th style=\"text-align:right\">공수</th><th style=\"text-align:right\">포설(M)</th><th>불량</th><th>비고</th><th></th></tr></thead>" +
+          "<thead><tr><th>일자/근무</th><th>팀</th><th>이름</th><th>아이디</th><th>위치</th><th style=\"text-align:right\">인원</th><th style=\"text-align:right\">공수</th><th style=\"text-align:right\">포설(M)</th><th>불량</th><th>비고</th><th></th></tr></thead>" +
           "<tbody>" + rowsHtml + "</tbody>" +
         "</table></div>" +
       "</div>";
@@ -2754,9 +2762,10 @@
       if (dur) totalMs += dur; else openCount++;
       var statusHtml = r.clockOutAt ? '<span class="att-status-pill done">퇴근완료</span>' : '<span class="att-status-pill open">근무중</span>';
       var wAccount = getAccount(state, r.workerId);
-      var wLabel = (wAccount && wAccount.name) ? wAccount.name + "(" + r.workerId + ")" : r.workerId;
+      var wName = (wAccount && wAccount.name) ? wAccount.name : "—";
       return '<tr>' +
-        '<td class="rowlabel">' + escapeHtml(wLabel) + "</td>" +
+        '<td class="rowlabel">' + escapeHtml(wName) + "</td>" +
+        "<td>" + escapeHtml(r.workerId || "—") + "</td>" +
         "<td>" + escapeHtml(r.team) + "</td>" +
         '<td class="num">' + fmtHM(r.clockInAt) + "</td>" +
         "<td>" + attVerifyCellHtml(r.clockInLoc, r.clockInPhoto) + "</td>" +
@@ -2776,7 +2785,7 @@
         "</div>" +
         (dayRecords.length ?
           '<div class="stat-table-wrap"><table class="stat-table">' +
-            '<thead><tr><th class="rowlabel">작업자</th><th>소속팀</th><th>출근</th><th>출근확인</th><th>퇴근</th><th>퇴근확인</th><th>근무시간</th><th>상태</th></tr></thead>' +
+            '<thead><tr><th class="rowlabel">이름</th><th>아이디</th><th>소속팀</th><th>출근</th><th>출근확인</th><th>퇴근</th><th>퇴근확인</th><th>근무시간</th><th>상태</th></tr></thead>' +
             "<tbody>" + rowsHtml + "</tbody>" +
           "</table></div>" :
           '<div class="empty-state" style="padding:20px 0">이 날짜에는 기록이 없어요</div>') +
@@ -2875,18 +2884,17 @@
       buildSettingsListHtml("defectTypes", getDefectTypeOptions(st));
   }
 
-  // ---- sites page (현장 관리: company + 사업자등록번호 registry, workers pick a site at signup) ----
+  // ---- sites page (현장 관리: company registry, workers pick a site at signup) ----
   var sitesSearchQuery = "";
   function buildSiteCardHtml(s) {
     var teamsHtml = (s.teams && s.teams.length) ? s.teams.map(function (t, i) {
       return '<span class="settings-tag">' + escapeHtml(t) +
         ' <button type="button" class="settings-tag-remove" data-site-team-remove="' + s.id + '" data-site-team-idx="' + i + '">✕</button></span>';
     }).join("") : '<span class="settings-tag-empty">아직 소속팀이 없어요</span>';
-    return '<div class="panel site-card" data-site-company="' + escapeHtml((s.company || "").toLowerCase()) +
-      '" data-site-bizregno="' + escapeHtml((s.bizRegNo || "").toLowerCase()) + '">' +
+    return '<div class="panel site-card" data-site-company="' + escapeHtml((s.company || "").toLowerCase()) + '">' +
       '<div class="site-card-head">' +
         '<div><h2 style="margin:0 0 2px">' + escapeHtml(s.name) + '</h2>' +
-        '<div class="panel-caption" style="margin:0">' + escapeHtml(s.company || "회사명 미입력") + (s.bizRegNo ? " · 사업자등록번호 " + escapeHtml(s.bizRegNo) : "") + "</div></div>" +
+        '<div class="panel-caption" style="margin:0">' + escapeHtml(s.company || "회사명 미입력") + "</div></div>" +
         '<button type="button" class="settings-tag-remove" style="font-size:13px;padding:6px 10px" data-site-delete="' + s.id + '">현장 삭제</button>' +
       "</div>" +
       (s.address ? '<div class="panel-caption" style="margin:6px 0 0">📍 ' + escapeHtml(s.address) + "</div>" : "") +
@@ -2902,19 +2910,16 @@
     var sites = st.sites || [];
     var listHtml = sites.length ? sites.map(buildSiteCardHtml).join("") :
       '<div class="empty-state">아직 등록된 현장이 없어요. 아래에서 첫 현장을 등록해보세요.</div>';
-    return '<div class="panel-caption" style="margin:-4px 0 14px">공사 시작 전 "현장개설"을 여기서 등록하세요. 작업자는 회원가입할 때 회사명(사업자등록번호로 구분) → 현장 → 소속팀 순서로 골라요.</div>' +
+    return '<div class="panel-caption" style="margin:-4px 0 14px">공사 시작 전 "현장개설"을 여기서 등록하세요. 작업자는 회원가입할 때 회사명 → 현장 → 소속팀 순서로 골라요.</div>' +
       '<div class="panel">' +
         '<h2 style="margin:0 0 10px">새 현장 등록</h2>' +
         '<div class="field"><label>현장명</label><input type="text" id="siteNewName" placeholder="예: 000현장 3공구"></div>' +
-        '<div class="field-row">' +
-          '<div class="field"><label>회사명(발주처/시공사)</label><input type="text" id="siteNewCompany" placeholder="예: 모두건설(주)"></div>' +
-          '<div class="field"><label>사업자등록번호</label><input type="text" id="siteNewBizRegNo" placeholder="예: 123-45-67890"></div>' +
-        "</div>" +
+        '<div class="field"><label>회사명(발주처/시공사)</label><input type="text" id="siteNewCompany" placeholder="예: 모두건설(주)"></div>' +
         '<div class="field"><label>주소</label><input type="text" id="siteNewAddress" placeholder="예: 경기도 화성시 ..."></div>' +
         '<button type="button" class="submit-btn" id="btnSiteAdd">현장 등록</button>' +
       "</div>" +
       '<div class="panel">' +
-        '<div class="field" style="margin:0"><label>회사명 또는 사업자등록번호로 검색</label><input type="text" id="siteSearchInput" placeholder="검색어를 입력하세요" value="' + escapeHtml(sitesSearchQuery) + '"></div>' +
+        '<div class="field" style="margin:0"><label>회사명으로 검색</label><input type="text" id="siteSearchInput" placeholder="검색어를 입력하세요" value="' + escapeHtml(sitesSearchQuery) + '"></div>' +
       "</div>" +
       '<div id="siteListWrap">' + listHtml + "</div>";
   }
@@ -2922,7 +2927,7 @@
     var q = sitesSearchQuery.trim().toLowerCase();
     var cards = document.querySelectorAll(".site-card");
     Array.prototype.forEach.call(cards, function (card) {
-      var hay = (card.getAttribute("data-site-company") || "") + " " + (card.getAttribute("data-site-bizregno") || "");
+      var hay = card.getAttribute("data-site-company") || "";
       card.style.display = (!q || hay.indexOf(q) >= 0) ? "" : "none";
     });
   }
@@ -2940,11 +2945,10 @@
       addBtn.addEventListener("click", function () {
         var name = document.getElementById("siteNewName").value.trim();
         var company = document.getElementById("siteNewCompany").value.trim();
-        var bizRegNo = document.getElementById("siteNewBizRegNo").value.trim();
         var address = document.getElementById("siteNewAddress").value.trim();
         if (!name) { showToast("현장명을 입력해주세요"); return; }
         if (!company) { showToast("회사명을 입력해주세요"); return; }
-        state.sites.push({ id: uid(), name: name, company: company, bizRegNo: bizRegNo, address: address, teams: [], createdAt: Date.now() });
+        state.sites.push({ id: uid(), name: name, company: company, address: address, teams: [], createdAt: Date.now() });
         persist(function (ok) { if (ok) { showToast("현장이 등록됐어요"); renderDashView(); } });
       });
     }
@@ -3523,7 +3527,7 @@
     var siteSel = document.getElementById("authSite");
     var teamSel = document.getElementById("authTeam");
     if (companySel && siteSel && teamSel) {
-      // 회원가입: 회사명(사업자등록번호로 구분) -> 현장 -> 소속팀 순서로 고르게 하는 종속 선택
+      // 회원가입: 회사명 -> 현장 -> 소속팀 순서로 고르게 하는 종속 선택
       var companyList = authCompanyList(state);
       var refreshTeamOptions = function () {
         var site = findSite(state, siteSel.value);
@@ -3537,7 +3541,7 @@
       var refreshSiteOptions = function () {
         var idx = parseInt(companySel.value, 10);
         var c = companyList[idx];
-        var sites = c ? sitesForCompany(state, c.company, c.bizRegNo) : [];
+        var sites = c ? sitesForCompany(state, c.company) : [];
         siteSel.innerHTML = sites.length ? sites.map(function (s) {
           return '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>";
         }).join("") : '<option value="">(등록된 현장 없음)</option>';
