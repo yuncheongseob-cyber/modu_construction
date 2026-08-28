@@ -449,6 +449,7 @@
     border-radius: 8px; padding: 8px 12px; margin: -6px 0 16px;
   }
   .manday-hint.manday-hint-empty { color: var(--bad); }
+  .site-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 
   .auth-tabs { display: flex; gap: 6px; margin-bottom: 16px; }
   .auth-tabs button {
@@ -721,6 +722,7 @@
   try { state = JSON.parse(stateEl.textContent); } catch (e) { state = null; }
   if (!state || !state.teams) { state = { teams: ["김춘식팀", "이중화팀"], entries: [] }; }
   if (!state.accounts) state.accounts = {};
+  if (!state.sites) state.sites = []; // 현장 관리: {id, name, company, bizRegNo, address, teams:[...], createdAt}
 
   var TEAM_COLORS = ["#E8630A", "#2E7D4F", "#3B6FB6", "#A8720A", "#8C4FBF", "#C4432B"];
   function teamColor(teams, name) {
@@ -739,7 +741,30 @@
   var DEFAULT_DEFECT_TYPES = ["유형1", "유형2", "유형3", "유형4", "유형5", "유형6", "유형7", "유형8", "기타"];
   var SETTINGS_LIST_DEFAULTS = { floors: DEFAULT_FLOOR_OPTIONS, sites: DEFAULT_SITE_OPTIONS, defectTypes: DEFAULT_DEFECT_TYPES };
   function getFloorOptions(st) { return (st.settings && st.settings.floors && st.settings.floors.length) ? st.settings.floors : DEFAULT_FLOOR_OPTIONS; }
-  function getSiteOptions(st) { return (st.settings && st.settings.sites && st.settings.sites.length) ? st.settings.sites : DEFAULT_SITE_OPTIONS; }
+  function getSiteOptions(st) {
+    if (st.sites && st.sites.length) {
+      var names = [];
+      st.sites.forEach(function (s) { if (names.indexOf(s.name) < 0) names.push(s.name); });
+      if (names.length) return names;
+    }
+    return (st.settings && st.settings.sites && st.settings.sites.length) ? st.settings.sites : DEFAULT_SITE_OPTIONS;
+  }
+  function findSite(st, id) {
+    var list = st.sites || [];
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id) return list[i]; }
+    return null;
+  }
+  function authCompanyList(st) {
+    var seen = {}, list = [];
+    (st.sites || []).forEach(function (s) {
+      var key = (s.company || "") + "" + (s.bizRegNo || "");
+      if (!seen[key]) { seen[key] = true; list.push({ company: s.company || "", bizRegNo: s.bizRegNo || "" }); }
+    });
+    return list;
+  }
+  function sitesForCompany(st, company, bizRegNo) {
+    return (st.sites || []).filter(function (s) { return (s.company || "") === company && (s.bizRegNo || "") === bizRegNo; });
+  }
   function getDefectTypeOptions(st) { return (st.settings && st.settings.defectTypes && st.settings.defectTypes.length) ? st.settings.defectTypes : DEFAULT_DEFECT_TYPES; }
   function ensureSettingsList(key) {
     if (!state.settings) state.settings = {};
@@ -759,6 +784,7 @@
     { key: "attendance", icon: "⏰", label: "출퇴근 관리" },
     { key: "log", icon: "📋", label: "실적 로그" },
     { key: "photos", icon: "🖼", label: "작업 사진" },
+    { key: "sites", icon: "🏗️", label: "현장 관리" },
     { key: "settings", icon: "⚙️", label: "항목 설정" },
     { key: "storage", icon: "💾", label: "저장공간" }
   ];
@@ -1401,9 +1427,27 @@
     var roleOpts = ROLE_OPTIONS.map(function (r) {
       return '<option value="' + r + '">' + r + "</option>";
     }).join("");
-    var teamOpts = st.teams.map(function (t) {
-      return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
-    }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
+    var hasSites = (st.sites && st.sites.length) ? true : false;
+    var siteFieldsHtml;
+    if (hasSites) {
+      var companyList = authCompanyList(st);
+      var companyOpts = companyList.map(function (c, i) {
+        var label = c.company + (c.bizRegNo ? " (" + c.bizRegNo + ")" : "");
+        return '<option value="' + i + '">' + escapeHtml(label) + "</option>";
+      }).join("");
+      siteFieldsHtml =
+        '<div class="field"><label>회사명</label><select id="authCompany">' + companyOpts + "</select></div>" +
+        '<div class="field"><label>현장</label><select id="authSite"></select></div>' +
+        '<div class="field"><label>소속팀</label><select id="authTeam"></select></div>' +
+        '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>';
+    } else {
+      var teamOpts = st.teams.map(function (t) {
+        return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
+      }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
+      siteFieldsHtml =
+        '<div class="field"><label>소속팀</label><select id="authTeam">' + teamOpts + "</select></div>" +
+        '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>';
+    }
 
     var formHtml = isSignup ?
       ('<div class="field"><label>아이디</label><input type="text" id="authId" placeholder="예: hong123" autocomplete="off"></div>' +
@@ -1412,8 +1456,7 @@
       '<div class="field"><label>비밀번호 확인</label><input type="password" id="authPw2" placeholder="비밀번호를 한번 더 입력" autocomplete="new-password"></div>' +
       '<div class="field"><label>휴대폰 번호</label><input type="tel" id="authPhone" placeholder="예: 01012345678" autocomplete="off"></div>' +
       '<div class="field"><label>직종</label><select id="authRole">' + roleOpts + "</select></div>" +
-      '<div class="field"><label>소속팀</label><select id="authTeam">' + teamOpts + "</select></div>" +
-      '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>' +
+      siteFieldsHtml +
       errorHtml +
       '<button type="button" class="submit-btn" id="btnAuthSignup"' + (authBusy ? " disabled" : "") + '>' + (authBusy ? "가입 중…" : "가입하기") + "</button>") :
       ('<div class="field"><label>아이디</label><input type="text" id="authId" placeholder="예: hong123" autocomplete="off"></div>' +
@@ -1548,7 +1591,8 @@
         "</div></div>";
     }
 
-    var teams = st.teams;
+    var accountSite = account.siteId ? findSite(st, account.siteId) : null;
+    var teams = (accountSite && accountSite.teams && accountSite.teams.length) ? accountSite.teams : st.teams;
     var defaultTeam = (account.team && teams.indexOf(account.team) >= 0) ? account.team : "";
     var opts = teams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === defaultTeam ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
@@ -1907,6 +1951,7 @@
     else if (page === "attendance") content = buildAttendancePageHtml(st);
     else if (page === "log") content = buildLogPageHtml(st, dateFilter || "all");
     else if (page === "photos") content = buildPhotoGalleryHtml(st.entries, st.teams);
+    else if (page === "sites") content = buildSitesPageHtml(st);
     else if (page === "settings") content = buildSettingsPageHtml(st);
     else if (page === "storage") content = buildStoragePanelHtml(st);
     else content = buildOverviewPageHtml(st);
@@ -2825,10 +2870,116 @@
     "</div>";
   }
   function buildSettingsPageHtml(st) {
-    return '<div class="panel-caption" style="margin:-4px 0 14px">여기서 추가·삭제한 항목은 실적 입력 화면에 바로 반영돼요. 이미 저장된 실적 기록은 바뀌지 않아요.</div>' +
+    return '<div class="panel-caption" style="margin:-4px 0 14px">여기서 추가·삭제한 항목은 실적 입력 화면에 바로 반영돼요. 이미 저장된 실적 기록은 바뀌지 않아요. 현장(작업구역) 목록은 "🏗️ 현장 관리"에서 관리해요.</div>' +
       buildSettingsListHtml("floors", getFloorOptions(st)) +
-      buildSettingsListHtml("sites", getSiteOptions(st)) +
       buildSettingsListHtml("defectTypes", getDefectTypeOptions(st));
+  }
+
+  // ---- sites page (현장 관리: company + 사업자등록번호 registry, workers pick a site at signup) ----
+  var sitesSearchQuery = "";
+  function buildSiteCardHtml(s) {
+    var teamsHtml = (s.teams && s.teams.length) ? s.teams.map(function (t, i) {
+      return '<span class="settings-tag">' + escapeHtml(t) +
+        ' <button type="button" class="settings-tag-remove" data-site-team-remove="' + s.id + '" data-site-team-idx="' + i + '">✕</button></span>';
+    }).join("") : '<span class="settings-tag-empty">아직 소속팀이 없어요</span>';
+    return '<div class="panel site-card" data-site-company="' + escapeHtml((s.company || "").toLowerCase()) +
+      '" data-site-bizregno="' + escapeHtml((s.bizRegNo || "").toLowerCase()) + '">' +
+      '<div class="site-card-head">' +
+        '<div><h2 style="margin:0 0 2px">' + escapeHtml(s.name) + '</h2>' +
+        '<div class="panel-caption" style="margin:0">' + escapeHtml(s.company || "회사명 미입력") + (s.bizRegNo ? " · 사업자등록번호 " + escapeHtml(s.bizRegNo) : "") + "</div></div>" +
+        '<button type="button" class="settings-tag-remove" style="font-size:13px;padding:6px 10px" data-site-delete="' + s.id + '">현장 삭제</button>' +
+      "</div>" +
+      (s.address ? '<div class="panel-caption" style="margin:6px 0 0">📍 ' + escapeHtml(s.address) + "</div>" : "") +
+      '<div class="section-title" style="margin:14px 0 8px">소속팀</div>' +
+      '<div class="settings-tags">' + teamsHtml + "</div>" +
+      '<div class="field-row" style="margin-top:10px;align-items:flex-end">' +
+        '<div class="field" style="margin:0"><label>새 팀 추가</label><input type="text" id="siteTeamInput_' + s.id + '" placeholder="예: 박정호팀"></div>' +
+        '<button type="button" class="submit-btn" style="margin-top:0;flex:0 0 auto;padding:0 16px" data-site-addteam="' + s.id + '">추가</button>' +
+      "</div>" +
+    "</div>";
+  }
+  function buildSitesPageHtml(st) {
+    var sites = st.sites || [];
+    var listHtml = sites.length ? sites.map(buildSiteCardHtml).join("") :
+      '<div class="empty-state">아직 등록된 현장이 없어요. 아래에서 첫 현장을 등록해보세요.</div>';
+    return '<div class="panel-caption" style="margin:-4px 0 14px">공사 시작 전 "현장개설"을 여기서 등록하세요. 작업자는 회원가입할 때 회사명(사업자등록번호로 구분) → 현장 → 소속팀 순서로 골라요.</div>' +
+      '<div class="panel">' +
+        '<h2 style="margin:0 0 10px">새 현장 등록</h2>' +
+        '<div class="field"><label>현장명</label><input type="text" id="siteNewName" placeholder="예: 000현장 3공구"></div>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>회사명(발주처/시공사)</label><input type="text" id="siteNewCompany" placeholder="예: 모두건설(주)"></div>' +
+          '<div class="field"><label>사업자등록번호</label><input type="text" id="siteNewBizRegNo" placeholder="예: 123-45-67890"></div>' +
+        "</div>" +
+        '<div class="field"><label>주소</label><input type="text" id="siteNewAddress" placeholder="예: 경기도 화성시 ..."></div>' +
+        '<button type="button" class="submit-btn" id="btnSiteAdd">현장 등록</button>' +
+      "</div>" +
+      '<div class="panel">' +
+        '<div class="field" style="margin:0"><label>회사명 또는 사업자등록번호로 검색</label><input type="text" id="siteSearchInput" placeholder="검색어를 입력하세요" value="' + escapeHtml(sitesSearchQuery) + '"></div>' +
+      "</div>" +
+      '<div id="siteListWrap">' + listHtml + "</div>";
+  }
+  function applySiteSearchFilter() {
+    var q = sitesSearchQuery.trim().toLowerCase();
+    var cards = document.querySelectorAll(".site-card");
+    Array.prototype.forEach.call(cards, function (card) {
+      var hay = (card.getAttribute("data-site-company") || "") + " " + (card.getAttribute("data-site-bizregno") || "");
+      card.style.display = (!q || hay.indexOf(q) >= 0) ? "" : "none";
+    });
+  }
+  function wireSitesPage() {
+    var searchInput = document.getElementById("siteSearchInput");
+    if (searchInput) {
+      searchInput.addEventListener("input", function () {
+        sitesSearchQuery = this.value;
+        applySiteSearchFilter();
+      });
+      applySiteSearchFilter();
+    }
+    var addBtn = document.getElementById("btnSiteAdd");
+    if (addBtn) {
+      addBtn.addEventListener("click", function () {
+        var name = document.getElementById("siteNewName").value.trim();
+        var company = document.getElementById("siteNewCompany").value.trim();
+        var bizRegNo = document.getElementById("siteNewBizRegNo").value.trim();
+        var address = document.getElementById("siteNewAddress").value.trim();
+        if (!name) { showToast("현장명을 입력해주세요"); return; }
+        if (!company) { showToast("회사명을 입력해주세요"); return; }
+        state.sites.push({ id: uid(), name: name, company: company, bizRegNo: bizRegNo, address: address, teams: [], createdAt: Date.now() });
+        persist(function (ok) { if (ok) { showToast("현장이 등록됐어요"); renderDashView(); } });
+      });
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-site-delete]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-site-delete");
+        state.sites = state.sites.filter(function (s) { return s.id !== id; });
+        persist(function (ok) { if (ok) { showToast("현장이 삭제됐어요"); renderDashView(); } });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-site-addteam]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-site-addteam");
+        var site = findSite(state, id);
+        if (!site) return;
+        var input = document.getElementById("siteTeamInput_" + id);
+        var val = (input.value || "").trim();
+        if (!val) { showToast("팀 이름을 입력해주세요"); return; }
+        if (!site.teams) site.teams = [];
+        if (site.teams.indexOf(val) >= 0) { showToast("이미 있는 팀이에요"); return; }
+        site.teams.push(val);
+        if (state.teams.indexOf(val) < 0) state.teams.push(val);
+        persist(function (ok) { if (ok) { showToast("추가됐어요"); renderDashView(); } });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-site-team-remove]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-site-team-remove");
+        var idx = parseInt(btn.getAttribute("data-site-team-idx"), 10);
+        var site = findSite(state, id);
+        if (!site || !site.teams || isNaN(idx) || idx < 0 || idx >= site.teams.length) return;
+        site.teams.splice(idx, 1);
+        persist(function (ok) { if (ok) { showToast("삭제됐어요"); renderDashView(); } });
+      });
+    });
   }
   function wireSettingsPage() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-settings-add]"), function (btn) {
@@ -3368,8 +3519,34 @@
         renderInputView();
       });
     }
+    var companySel = document.getElementById("authCompany");
+    var siteSel = document.getElementById("authSite");
     var teamSel = document.getElementById("authTeam");
-    if (teamSel) {
+    if (companySel && siteSel && teamSel) {
+      // 회원가입: 회사명(사업자등록번호로 구분) -> 현장 -> 소속팀 순서로 고르게 하는 종속 선택
+      var companyList = authCompanyList(state);
+      var refreshTeamOptions = function () {
+        var site = findSite(state, siteSel.value);
+        var teams = (site && site.teams) ? site.teams : [];
+        teamSel.innerHTML = teams.map(function (t) {
+          return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
+        }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
+        var wrap = document.getElementById("authTeamNewWrap");
+        if (wrap) wrap.style.display = "none";
+      };
+      var refreshSiteOptions = function () {
+        var idx = parseInt(companySel.value, 10);
+        var c = companyList[idx];
+        var sites = c ? sitesForCompany(state, c.company, c.bizRegNo) : [];
+        siteSel.innerHTML = sites.length ? sites.map(function (s) {
+          return '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>";
+        }).join("") : '<option value="">(등록된 현장 없음)</option>';
+        refreshTeamOptions();
+      };
+      companySel.addEventListener("change", refreshSiteOptions);
+      siteSel.addEventListener("change", refreshTeamOptions);
+      refreshSiteOptions();
+    } else if (teamSel) {
       teamSel.addEventListener("change", function () {
         document.getElementById("authTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
       });
@@ -3407,6 +3584,8 @@
     var pw2 = document.getElementById("authPw2").value;
     var phone = document.getElementById("authPhone").value.trim();
     var role = document.getElementById("authRole").value;
+    var hasSites = (state.sites && state.sites.length) ? true : false;
+    var siteId = "", siteName = "";
     var teamSel = document.getElementById("authTeam").value;
     var team = teamSel;
     if (!id) { authError = "아이디를 입력해주세요"; renderInputView(); return; }
@@ -3415,6 +3594,13 @@
     if (!pw || pw.length < 4) { authError = "비밀번호는 4자 이상으로 입력해주세요"; renderInputView(); return; }
     if (pw !== pw2) { authError = "비밀번호가 서로 달라요"; renderInputView(); return; }
     if (!phone) { authError = "휴대폰 번호를 입력해주세요"; renderInputView(); return; }
+    if (hasSites) {
+      var siteSel = document.getElementById("authSite");
+      siteId = siteSel ? siteSel.value : "";
+      var site = findSite(state, siteId);
+      if (!site) { authError = "현장을 선택해주세요"; renderInputView(); return; }
+      siteName = site.name;
+    }
     if (teamSel === "__new__") {
       var nv = document.getElementById("authTeamNew").value.trim();
       if (!nv) { authError = "새 팀 이름을 입력해주세요"; renderInputView(); return; }
@@ -3423,7 +3609,11 @@
     authBusy = true; authError = ""; renderInputView();
     hashPassword(id, pw).then(function (hash) {
       if (!state.accounts) state.accounts = {};
-      state.accounts[id] = { workerId: id, name: name, passwordHash: hash, phone: phone, role: role, team: team, createdAt: Date.now() };
+      state.accounts[id] = { workerId: id, name: name, passwordHash: hash, phone: phone, role: role, team: team, siteId: siteId || null, site: siteName || "", createdAt: Date.now() };
+      if (siteId) {
+        var s = findSite(state, siteId);
+        if (s) { if (!s.teams) s.teams = []; if (s.teams.indexOf(team) < 0) s.teams.push(team); }
+      }
       if (state.teams.indexOf(team) < 0) state.teams.push(team);
       persist(function (ok) {
         authBusy = false;
@@ -3537,6 +3727,7 @@
       return;
     }
     wireSettingsPage();
+    wireSitesPage();
     var dateSearchInput = document.getElementById("dateFilterSearchInput");
     if (dateSearchInput) {
       dateSearchInput.addEventListener("input", function () {
