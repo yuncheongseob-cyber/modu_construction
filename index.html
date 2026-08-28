@@ -400,6 +400,26 @@
   }
   .input-subtabs button.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 
+  .account-bar {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; margin-bottom: 12px;
+    background: var(--surface-2); border-radius: 10px; font-size: 12.5px; flex-wrap: wrap;
+  }
+  .account-bar-id { font-weight: 700; }
+  .account-bar-meta { color: var(--text-muted); }
+  .account-bar-btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+    font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+  }
+  .account-bar-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  .auth-tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+  .auth-tabs button {
+    flex: 1; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+    font-size: 13px; font-weight: 700; padding: 9px; border-radius: 8px; cursor: pointer;
+  }
+  .auth-tabs button.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .auth-error { font-size: 12px; color: #fff; background: var(--bad); padding: 8px 10px; border-radius: 8px; margin: 4px 0 12px; }
+
   .manday-total { font-size: 13px; color: var(--text-muted); margin: 14px 0 10px; }
   .manday-total b { color: var(--text); font-family: "IBM Plex Mono", monospace; }
 
@@ -662,6 +682,7 @@
   var state;
   try { state = JSON.parse(stateEl.textContent); } catch (e) { state = null; }
   if (!state || !state.teams) { state = { teams: ["김춘식팀", "이중화팀"], entries: [] }; }
+  if (!state.accounts) state.accounts = {};
 
   var TEAM_COLORS = ["#E8630A", "#2E7D4F", "#3B6FB6", "#A8720A", "#8C4FBF", "#C4432B"];
   function teamColor(teams, name) {
@@ -850,6 +871,7 @@
         var remote = snap.val();
         if (remote && remote.teams) {
           state = remote;
+          if (!state.accounts) state.accounts = {};
           firebaseSyncedOnce = true;
           renderDashView(); // safe to refresh (read-only view); the input form is left alone so in-progress typing isn't wiped
           setSyncStatus(true, "실시간 동기화됨");
@@ -1192,6 +1214,9 @@
   }
 
   var currentInputTab = "entry";
+  var authMode = "login"; // "login" | "signup"
+  var authError = "";
+  var authBusy = false;
   // attLocationState.status: "idle" | "checking" | "ok" | "error" | "unsupported"
   // "idle" and "checking" render identically ("위치 확인 중…") so kicking off the
   // geolocation fetch never needs to trigger a synchronous re-render mid-render.
@@ -1227,7 +1252,51 @@
     startAttGeoFetch();
   }
 
+  function buildAuthGateHtml(st) {
+    var isSignup = authMode === "signup";
+    var errorHtml = authError ? '<div class="auth-error">' + escapeHtml(authError) + "</div>" : "";
+    var roleOpts = ROLE_OPTIONS.map(function (r) {
+      return '<option value="' + r + '">' + r + "</option>";
+    }).join("");
+    var teamOpts = st.teams.map(function (t) {
+      return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
+    }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
+
+    var formHtml = isSignup ?
+      ('<div class="field"><label>아이디</label><input type="text" id="authId" placeholder="예: hong123" autocomplete="off"></div>' +
+      '<div class="field"><label>비밀번호</label><input type="password" id="authPw" placeholder="4자 이상" autocomplete="new-password"></div>' +
+      '<div class="field"><label>비밀번호 확인</label><input type="password" id="authPw2" placeholder="비밀번호를 한번 더 입력" autocomplete="new-password"></div>' +
+      '<div class="field"><label>휴대폰 번호</label><input type="tel" id="authPhone" placeholder="예: 01012345678" autocomplete="off"></div>' +
+      '<div class="field"><label>직종</label><select id="authRole">' + roleOpts + "</select></div>" +
+      '<div class="field"><label>소속팀</label><select id="authTeam">' + teamOpts + "</select></div>" +
+      '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>' +
+      errorHtml +
+      '<button type="button" class="submit-btn" id="btnAuthSignup"' + (authBusy ? " disabled" : "") + '>' + (authBusy ? "가입 중…" : "가입하기") + "</button>") :
+      ('<div class="field"><label>아이디</label><input type="text" id="authId" placeholder="예: hong123" autocomplete="off"></div>' +
+      '<div class="field"><label>비밀번호</label><input type="password" id="authPw" placeholder="비밀번호" autocomplete="current-password"></div>' +
+      errorHtml +
+      '<button type="button" class="submit-btn" id="btnAuthLogin"' + (authBusy ? " disabled" : "") + '>' + (authBusy ? "로그인 중…" : "로그인") + "</button>");
+
+    return "" +
+      '<div class="phone-wrap"><div class="phone">' +
+        '<div class="phone-topbar">' +
+          '<div class="app-name">🦺 현장 입력</div>' +
+          '<div class="app-sub">로그인하고 오늘 작업을 기록하세요</div>' +
+        "</div>" +
+        '<div class="phone-body">' +
+          '<div class="auth-tabs">' +
+            '<button type="button" class="' + (!isSignup ? "active" : "") + '" data-authmode="login">로그인</button>' +
+            '<button type="button" class="' + (isSignup ? "active" : "") + '" data-authmode="signup">회원가입</button>' +
+          "</div>" +
+          formHtml +
+        "</div>" +
+      "</div></div>";
+  }
+
   function buildInputViewHtml(st) {
+    if (!isLoggedIn(st)) return buildAuthGateHtml(st);
+    var account = currentAccount();
+    var acctBarHtml = buildAccountBarHtml(account);
     var tabsHtml = '<div class="input-subtabs">' +
       '<button type="button" class="' + (currentInputTab === "entry" ? "active" : "") + '" data-itab="entry">📋 실적 입력</button>' +
       '<button type="button" class="' + (currentInputTab === "manday" ? "active" : "") + '" data-itab="manday">🧾 내 공수 캘린더</button>' +
@@ -1235,13 +1304,41 @@
     "</div>";
     var body = currentInputTab === "manday" ? buildMandayCalendarHtml(st) :
       currentInputTab === "attendance" ? buildAttendanceViewHtml(st) : buildEntryFormHtml(st);
-    return tabsHtml + body;
+    return acctBarHtml + tabsHtml + body;
+  }
+
+  function buildAccountBarHtml(account) {
+    return '<div class="account-bar">' +
+      '<span class="account-bar-id">👤 <b>' + escapeHtml(account.workerId) + '</b></span>' +
+      '<span class="account-bar-meta">' + escapeHtml(account.role || "") + " · " + escapeHtml(account.team || "") + "</span>" +
+      '<span style="flex:1"></span>' +
+      '<button type="button" class="account-bar-btn" id="btnMyInfo">내 정보</button>' +
+      '<button type="button" class="account-bar-btn" id="btnLogout">로그아웃</button>' +
+    "</div>";
   }
 
   function buildEntryFormHtml(st) {
+    var account = currentAccount();
+    if (!account || account.role !== LEAD_ROLE) {
+      // 실적 입력 자체를 계장공(팀장)만 쓸 수 있게 잠근다.
+      return "" +
+        '<div class="phone-wrap"><div class="phone">' +
+          '<div class="phone-topbar">' +
+            '<div class="app-name">🦺 현장 입력</div>' +
+            '<div class="app-sub">오늘 작업 실적을 기록하세요</div>' +
+          "</div>" +
+          '<div class="phone-body">' +
+            '<div class="entry-locked">' +
+              '<div class="entry-locked-icon">🔒</div>' +
+              '<div class="entry-locked-title">실적 입력은 계장공(팀장)만 작성할 수 있어요</div>' +
+              '<div class="entry-locked-sub">본인이 팀장이신데 다르게 나온다면, 위 "내 정보"에서 직종을 "계장공(팀장)"으로 바꿔주세요.</div>' +
+            "</div>" +
+          "</div>" +
+        "</div></div>";
+    }
+
     var teams = st.teams;
-    var savedTeam = getSavedWorkerTeam();
-    var defaultTeam = (savedTeam && teams.indexOf(savedTeam) >= 0) ? savedTeam : "";
+    var defaultTeam = (account.team && teams.indexOf(account.team) >= 0) ? account.team : "";
     var opts = teams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === defaultTeam ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
@@ -1251,30 +1348,6 @@
     var defectOpts = '<option value="">없음</option>' + DEFECT_TYPES.map(function (t) {
       return '<option value="' + t + '">' + t + "</option>";
     }).join("");
-    var savedRole = getSavedWorkerRole();
-    var roleOpts = ROLE_OPTIONS.map(function (r) {
-      return '<option value="' + r + '"' + (r === savedRole ? " selected" : "") + '>' + r + "</option>";
-    }).join("");
-    var roleFieldHtml = '<div class="field"><label>직종</label><select id="fRole">' + roleOpts + "</select></div>";
-
-    if (savedRole !== LEAD_ROLE) {
-      // 실적 입력 자체를 계장공(팀장)만 쓸 수 있게 잠근다. 직종만 골라서 본인이 팀장인지 확인/변경할 수 있게 해준다.
-      return "" +
-        '<div class="phone-wrap"><div class="phone">' +
-          '<div class="phone-topbar">' +
-            '<div class="app-name">🦺 현장 입력</div>' +
-            '<div class="app-sub">오늘 작업 실적을 기록하세요</div>' +
-          "</div>" +
-          '<div class="phone-body">' +
-            roleFieldHtml +
-            '<div class="entry-locked">' +
-              '<div class="entry-locked-icon">🔒</div>' +
-              '<div class="entry-locked-title">실적 입력은 계장공(팀장)만 작성할 수 있어요</div>' +
-              '<div class="entry-locked-sub">본인이 팀장이신데 다르게 나온다면, 위에서 직종을 "계장공(팀장)"으로 바꿔주세요.</div>' +
-            "</div>" +
-          "</div>" +
-        "</div></div>";
-    }
 
     return "" +
       '<div class="phone-wrap"><div class="phone">' +
@@ -1284,12 +1357,6 @@
         "</div>" +
         '<div class="phone-body">' +
           storageChipHtml(st) +
-          roleFieldHtml +
-          '<div class="field worker-field">' +
-            "<label>작업자 아이디</label>" +
-            '<input type="text" id="fWorkerId" placeholder="예: hong123" autocomplete="off">' +
-            '<label class="remember-check"><input type="checkbox" id="fWorkerRemember" checked> 이 기기에 아이디 저장</label>' +
-          "</div>" +
           '<div class="field"><label>소속팀</label><select id="fTeam">' + opts + "</select></div>" +
           '<div class="field" id="fTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="fTeamNew" placeholder="예: 박정호팀"></div>' +
           '<div class="field-row">' +
@@ -1404,8 +1471,9 @@
   }
 
   function buildMandayCalendarHtml(st) {
-    var workerId = getSavedWorkerId();
-    var team = getSavedWorkerTeam() || st.teams[0] || "";
+    var account = currentAccount();
+    var workerId = account ? account.workerId : "";
+    var team = (account && account.team) || st.teams[0] || "";
     var teamOpts = st.teams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === team ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("");
@@ -1478,10 +1546,6 @@
           '<div class="app-sub">날짜를 선택하고 근무형태를 눌러 공수를 등록하세요</div>' +
         "</div>" +
         '<div class="phone-body">' +
-          '<div class="field worker-field">' +
-            "<label>작업자 아이디</label>" +
-            '<input type="text" id="mWorkerId" value="' + escapeHtml(workerId) + '" placeholder="예: hong123" autocomplete="off">' +
-          "</div>" +
           '<div class="field"><label>소속팀</label><select id="mTeam">' + teamOpts + "</select></div>" +
 
           '<div class="cal-monthnav">' +
@@ -1541,8 +1605,9 @@
   }
 
   function buildAttendanceViewHtml(st) {
-    var workerId = getSavedWorkerId();
-    var team = getSavedWorkerTeam() || st.teams[0] || "";
+    var account = currentAccount();
+    var workerId = account ? account.workerId : "";
+    var team = (account && account.team) || st.teams[0] || "";
     var teamOpts = st.teams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === team ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("");
@@ -1623,10 +1688,6 @@
           '<div class="app-sub">출근·퇴근 버튼을 눌러 근무 시간을 기록하세요</div>' +
         "</div>" +
         '<div class="phone-body">' +
-          '<div class="field worker-field">' +
-            "<label>작업자 아이디</label>" +
-            '<input type="text" id="aWorkerId" value="' + escapeHtml(workerId) + '" placeholder="예: hong123" autocomplete="off">' +
-          "</div>" +
           '<div class="field"><label>소속팀</label><select id="aTeam">' + teamOpts + "</select></div>" +
           mapHtml +
           statusHtml +
@@ -2610,19 +2671,34 @@
     return '<div class="panel"><h2>작업 사진 <span class="count">· 총 ' + count + '장</span></h2><div class="gallery-list">' + groupsHtml + "</div></div>";
   }
 
-  // ================= worker id / photo capture =================
-  var WORKER_ID_KEY = "sitelog_worker_id";
-  var WORKER_ROLE_KEY = "sitelog_worker_role";
-  var WORKER_TEAM_KEY = "sitelog_worker_team";
-  function getSavedWorkerId() { try { return localStorage.getItem(WORKER_ID_KEY) || ""; } catch (e) { return ""; } }
-  function saveWorkerId(id) { try { localStorage.setItem(WORKER_ID_KEY, id); } catch (e) {} }
-  function clearSavedWorkerId() { try { localStorage.removeItem(WORKER_ID_KEY); } catch (e) {} }
-  function getSavedWorkerRole() { try { return localStorage.getItem(WORKER_ROLE_KEY) || ""; } catch (e) { return ""; } }
-  function saveWorkerRole(r) { try { localStorage.setItem(WORKER_ROLE_KEY, r); } catch (e) {} }
-  function clearSavedWorkerRole() { try { localStorage.removeItem(WORKER_ROLE_KEY); } catch (e) {} }
-  function getSavedWorkerTeam() { try { return localStorage.getItem(WORKER_TEAM_KEY) || ""; } catch (e) { return ""; } }
-  function saveWorkerTeam(t) { try { localStorage.setItem(WORKER_TEAM_KEY, t); } catch (e) {} }
-  function clearSavedWorkerTeam() { try { localStorage.removeItem(WORKER_TEAM_KEY); } catch (e) {} }
+  // ================= accounts / login =================
+  var LOGGED_IN_KEY = "sitelog_logged_in_worker_id";
+  function getLoggedInWorkerId() { try { return localStorage.getItem(LOGGED_IN_KEY) || ""; } catch (e) { return ""; } }
+  function setLoggedInWorkerId(id) { try { localStorage.setItem(LOGGED_IN_KEY, id); } catch (e) {} }
+  function clearLoggedInWorkerId() { try { localStorage.removeItem(LOGGED_IN_KEY); } catch (e) {} }
+  function getAccount(st, workerId) {
+    if (!workerId || !st || !st.accounts) return null;
+    return st.accounts[workerId] || null;
+  }
+  function isLoggedIn(st) { return !!getAccount(st, getLoggedInWorkerId()); }
+  function currentAccount() { return getAccount(state, getLoggedInWorkerId()); }
+  // Simple client-side hash (SHA-256 of id+password) so passwords aren't stored as plain text in Firebase.
+  // Note: this is a basic deterrent, not strong security — the Firebase database itself should be locked down
+  // (not left in open "test mode") once the team is set up, since anyone with the DB URL can otherwise read this.
+  function hashPassword(workerId, password) {
+    var input = (workerId || "").toLowerCase() + "::sitelog::" + (password || "");
+    if (window.crypto && crypto.subtle && crypto.subtle.digest) {
+      var bytes = new TextEncoder().encode(input);
+      return crypto.subtle.digest("SHA-256", bytes).then(function (buf) {
+        var arr = Array.prototype.slice.call(new Uint8Array(buf));
+        return arr.map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+      });
+    }
+    // very old browsers without SubtleCrypto: fall back to a weak numeric hash rather than plain text
+    var h = 0;
+    for (var i = 0; i < input.length; i++) { h = ((h << 5) - h + input.charCodeAt(i)) | 0; }
+    return Promise.resolve("fallback:" + h);
+  }
 
   var pendingPhotos = [];
   function renderPhotoThumbs() {
@@ -2690,6 +2766,21 @@
 
   function renderInputView() {
     document.getElementById("viewInput").innerHTML = buildInputViewHtml(state);
+
+    if (!isLoggedIn(state)) {
+      wireAuthGate();
+      return;
+    }
+
+    var logoutBtn = document.getElementById("btnLogout");
+    if (logoutBtn) logoutBtn.addEventListener("click", function () {
+      clearLoggedInWorkerId();
+      authMode = "login"; authError = "";
+      renderInputView();
+    });
+    var myInfoBtn = document.getElementById("btnMyInfo");
+    if (myInfoBtn) myInfoBtn.addEventListener("click", openMyInfoModal);
+
     var tabBtns = document.querySelectorAll("#viewInput .input-subtabs button");
     for (var ti = 0; ti < tabBtns.length; ti++) {
       tabBtns[ti].addEventListener("click", function () {
@@ -2707,18 +2798,12 @@
       return;
     }
 
-    document.getElementById("fRole").addEventListener("change", function () {
-      saveWorkerRole(this.value);
-      renderInputView(); // role decides whether the rest of the entry form is even shown
-    });
-    if (getSavedWorkerRole() !== LEAD_ROLE) return; // locked view — nothing else on this tab to wire up
+    var account = currentAccount();
+    if (!account || account.role !== LEAD_ROLE) return; // locked view — nothing else on this tab to wire up
 
     document.getElementById("fTeam").addEventListener("change", function () {
       document.getElementById("fTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
     });
-    var savedId = getSavedWorkerId();
-    document.getElementById("fWorkerId").value = savedId;
-    document.getElementById("fWorkerRemember").checked = true;
     ["fRoleManager", "fRoleSupervisor", "fRoleGuide"].forEach(function (id) {
       document.getElementById(id).addEventListener("input", updatePersonnelTotal);
     });
@@ -2735,12 +2820,7 @@
 
   function wireMandayCalendar() {
     document.getElementById("mTeam").addEventListener("change", function () {
-      saveWorkerTeam(this.value);
-    });
-    document.getElementById("mWorkerId").addEventListener("change", function () {
-      saveWorkerId(this.value.trim());
-      mandayDraftWorkerId = null; // force reload of the draft store for the (possibly new) worker
-      renderInputView();
+      // 소속팀은 계정에 고정된 값이라 이 화면에서 바꾼 건 이번 화면에서만 쓰이고 저장되진 않는다.
     });
     document.getElementById("viewInput").querySelector(".cal-monthnav").addEventListener("click", function (e) {
       var btn = e.target.closest ? e.target.closest("[data-monthnav]") : null;
@@ -2778,13 +2858,6 @@
   }
 
   function wireAttendanceView() {
-    document.getElementById("aWorkerId").addEventListener("change", function () {
-      saveWorkerId(this.value.trim());
-      renderInputView();
-    });
-    document.getElementById("aTeam").addEventListener("change", function () {
-      saveWorkerTeam(this.value);
-    });
     var geo = getAttGeo(state);
     if (geo.enabled && attLocationState.status === "idle") {
       attLocationState = { status: "checking" };
@@ -2939,11 +3012,10 @@
   }
 
   function clockIn() {
-    var workerId = document.getElementById("aWorkerId").value.trim();
-    if (!workerId) { showToast("작업자 아이디를 입력해주세요"); return; }
-    saveWorkerId(workerId);
+    var account = currentAccount();
+    if (!account) { showToast("로그인이 필요해요"); renderInputView(); return; }
+    var workerId = account.workerId;
     var team = document.getElementById("aTeam").value;
-    saveWorkerTeam(team);
     var geo = getAttGeo(state);
     var geoOk = attLocationState.status === "ok" && attLocationState.within;
     var geoFailed = geo.enabled && (attLocationState.status === "error" || attLocationState.status === "unsupported");
@@ -3022,12 +3094,145 @@
     });
   }
 
+  // ================= login / signup =================
+  function wireAuthGate() {
+    var tabBtns = document.querySelectorAll(".auth-tabs button");
+    for (var i = 0; i < tabBtns.length; i++) {
+      tabBtns[i].addEventListener("click", function () {
+        authMode = this.getAttribute("data-authmode");
+        authError = "";
+        renderInputView();
+      });
+    }
+    var teamSel = document.getElementById("authTeam");
+    if (teamSel) {
+      teamSel.addEventListener("change", function () {
+        document.getElementById("authTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
+      });
+    }
+    var loginBtn = document.getElementById("btnAuthLogin");
+    if (loginBtn) loginBtn.addEventListener("click", doLogin);
+    var signupBtn = document.getElementById("btnAuthSignup");
+    if (signupBtn) signupBtn.addEventListener("click", doSignup);
+  }
+
+  function doLogin() {
+    var id = document.getElementById("authId").value.trim();
+    var pw = document.getElementById("authPw").value;
+    if (!id || !pw) { authError = "아이디와 비밀번호를 입력해주세요"; renderInputView(); return; }
+    var account = getAccount(state, id);
+    if (!account) { authError = "존재하지 않는 아이디예요"; renderInputView(); return; }
+    authBusy = true; authError = ""; renderInputView();
+    hashPassword(id, pw).then(function (hash) {
+      authBusy = false;
+      if (hash !== account.passwordHash) {
+        authError = "비밀번호가 올바르지 않아요";
+        renderInputView();
+        return;
+      }
+      setLoggedInWorkerId(id);
+      showToast(id + "님, 환영해요");
+      renderInputView();
+    });
+  }
+
+  function doSignup() {
+    var id = document.getElementById("authId").value.trim();
+    var pw = document.getElementById("authPw").value;
+    var pw2 = document.getElementById("authPw2").value;
+    var phone = document.getElementById("authPhone").value.trim();
+    var role = document.getElementById("authRole").value;
+    var teamSel = document.getElementById("authTeam").value;
+    var team = teamSel;
+    if (!id) { authError = "아이디를 입력해주세요"; renderInputView(); return; }
+    if (getAccount(state, id)) { authError = "이미 사용 중인 아이디예요"; renderInputView(); return; }
+    if (!pw || pw.length < 4) { authError = "비밀번호는 4자 이상으로 입력해주세요"; renderInputView(); return; }
+    if (pw !== pw2) { authError = "비밀번호가 서로 달라요"; renderInputView(); return; }
+    if (!phone) { authError = "휴대폰 번호를 입력해주세요"; renderInputView(); return; }
+    if (teamSel === "__new__") {
+      var nv = document.getElementById("authTeamNew").value.trim();
+      if (!nv) { authError = "새 팀 이름을 입력해주세요"; renderInputView(); return; }
+      team = nv;
+    }
+    authBusy = true; authError = ""; renderInputView();
+    hashPassword(id, pw).then(function (hash) {
+      if (!state.accounts) state.accounts = {};
+      state.accounts[id] = { workerId: id, passwordHash: hash, phone: phone, role: role, team: team, createdAt: Date.now() };
+      if (state.teams.indexOf(team) < 0) state.teams.push(team);
+      persist(function (ok) {
+        authBusy = false;
+        if (!ok) { authError = "가입 저장에 실패했어요. 인터넷 연결을 확인해주세요"; renderInputView(); return; }
+        setLoggedInWorkerId(id);
+        showToast("가입됐어요. 환영해요, " + id + "님");
+        renderInputView();
+      });
+    });
+  }
+
+  // ---- "내 정보" modal: lets a logged-in worker fix their own 직종/소속팀/휴대폰번호 without admin help ----
+  function openMyInfoModal() {
+    var account = currentAccount();
+    if (!account) return;
+    var existing = document.getElementById("myInfoModalOverlay");
+    if (existing) existing.parentNode.removeChild(existing);
+
+    var roleOpts = ROLE_OPTIONS.map(function (r) {
+      return '<option value="' + r + '"' + (r === account.role ? " selected" : "") + '>' + r + "</option>";
+    }).join("");
+    var teamOpts = state.teams.map(function (t) {
+      return '<option value="' + escapeHtml(t) + '"' + (t === account.team ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
+    }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
+
+    var overlay = document.createElement("div");
+    overlay.id = "myInfoModalOverlay";
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      '<div class="modal-card">' +
+        "<h3>내 정보 · " + escapeHtml(account.workerId) + "</h3>" +
+        '<div class="field"><label>직종</label><select id="miRole">' + roleOpts + "</select></div>" +
+        '<div class="field"><label>소속팀</label><select id="miTeam">' + teamOpts + "</select></div>" +
+        '<div class="field" id="miTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="miTeamNew" placeholder="예: 박정호팀"></div>' +
+        '<div class="field"><label>휴대폰 번호</label><input type="tel" id="miPhone" value="' + escapeHtml(account.phone || "") + '"></div>' +
+        '<div class="modal-actions">' +
+          '<button type="button" class="btn-secondary" id="miCancel">취소</button>' +
+          '<button type="button" class="submit-btn" id="miSave" style="margin-top:0">저장</button>' +
+        "</div>" +
+      "</div>";
+    document.body.appendChild(overlay);
+    document.getElementById("miCancel").addEventListener("click", closeMyInfoModal);
+    overlay.addEventListener("click", function (ev) { if (ev.target === overlay) closeMyInfoModal(); });
+    document.getElementById("miTeam").addEventListener("change", function () {
+      document.getElementById("miTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
+    });
+    document.getElementById("miSave").addEventListener("click", function () {
+      var newRole = document.getElementById("miRole").value;
+      var teamSel = document.getElementById("miTeam").value;
+      var newTeam = teamSel;
+      if (teamSel === "__new__") {
+        var nv = document.getElementById("miTeamNew").value.trim();
+        if (!nv) { showToast("새 팀 이름을 입력해주세요"); return; }
+        newTeam = nv;
+      }
+      account.role = newRole;
+      account.team = newTeam;
+      account.phone = document.getElementById("miPhone").value.trim();
+      if (state.teams.indexOf(newTeam) < 0) state.teams.push(newTeam);
+      closeMyInfoModal();
+      persist(function (ok) {
+        if (ok) { showToast("저장됐어요"); renderInputView(); }
+      });
+    });
+  }
+  function closeMyInfoModal() {
+    var overlay = document.getElementById("myInfoModalOverlay");
+    if (overlay) overlay.parentNode.removeChild(overlay);
+  }
+
   function saveMandayCalendar() {
-    var workerId = document.getElementById("mWorkerId").value.trim();
-    if (!workerId) { showToast("작업자 아이디를 입력해주세요"); return; }
-    saveWorkerId(workerId);
+    var account = currentAccount();
+    if (!account) { showToast("로그인이 필요해요"); renderInputView(); return; }
+    var workerId = account.workerId;
     var team = document.getElementById("mTeam").value;
-    saveWorkerTeam(team);
     if (!state.mandayLog) state.mandayLog = [];
     var month = currentMandayMonth || todayStr().slice(0, 7);
     // drop this worker+month's existing records, then re-add from the draft
@@ -3643,9 +3848,10 @@
   }
 
   function submitEntry() {
-    var workerId = document.getElementById("fWorkerId").value.trim();
-    if (!workerId) { showToast("작업자 아이디를 입력해주세요"); return; }
-    var role = document.getElementById("fRole").value;
+    var account = currentAccount();
+    if (!account) { showToast("로그인이 필요해요"); renderInputView(); return; }
+    var workerId = account.workerId;
+    var role = account.role;
 
     var teamSel = document.getElementById("fTeam").value;
     var team = teamSel;
@@ -3654,12 +3860,6 @@
       if (!nv) { showToast("새 팀 이름을 입력해주세요"); return; }
       team = nv;
       if (state.teams.indexOf(team) < 0) state.teams.push(team);
-    }
-    // 직종은 "실적 입력" 탭 접근 자체를 가르는 값이라, 이 저장 여부 체크박스와 상관없이 늘 기억해둔다 (선택 즉시 저장됨).
-    if (document.getElementById("fWorkerRemember").checked) {
-      saveWorkerId(workerId); saveWorkerTeam(team);
-    } else {
-      clearSavedWorkerId(); clearSavedWorkerTeam();
     }
 
     var entry = {
