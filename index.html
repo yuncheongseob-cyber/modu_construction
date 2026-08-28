@@ -553,6 +553,11 @@
   .att-locate-btn:hover { color: var(--text); border-color: var(--accent); }
   .att-locate-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+  .entry-locked { text-align: center; padding: 48px 20px; color: var(--text-muted); }
+  .entry-locked-icon { font-size: 34px; margin-bottom: 10px; }
+  .entry-locked-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .entry-locked-sub { font-size: 12.5px; color: var(--text-faint); line-height: 1.6; max-width: 280px; margin: 0 auto; }
+
   .admin-lock { max-width: 360px; margin: 40px auto; text-align: left; }
   .admin-lock h2 { margin-bottom: 6px; }
   .admin-lock-note { font-size: 12px; color: var(--bad); margin-top: 8px; min-height: 16px; }
@@ -1250,6 +1255,26 @@
     var roleOpts = ROLE_OPTIONS.map(function (r) {
       return '<option value="' + r + '"' + (r === savedRole ? " selected" : "") + '>' + r + "</option>";
     }).join("");
+    var roleFieldHtml = '<div class="field"><label>직종</label><select id="fRole">' + roleOpts + "</select></div>";
+
+    if (savedRole !== LEAD_ROLE) {
+      // 실적 입력 자체를 계장공(팀장)만 쓸 수 있게 잠근다. 직종만 골라서 본인이 팀장인지 확인/변경할 수 있게 해준다.
+      return "" +
+        '<div class="phone-wrap"><div class="phone">' +
+          '<div class="phone-topbar">' +
+            '<div class="app-name">🦺 현장 입력</div>' +
+            '<div class="app-sub">오늘 작업 실적을 기록하세요</div>' +
+          "</div>" +
+          '<div class="phone-body">' +
+            roleFieldHtml +
+            '<div class="entry-locked">' +
+              '<div class="entry-locked-icon">🔒</div>' +
+              '<div class="entry-locked-title">실적 입력은 계장공(팀장)만 작성할 수 있어요</div>' +
+              '<div class="entry-locked-sub">본인이 팀장이신데 다르게 나온다면, 위에서 직종을 "계장공(팀장)"으로 바꿔주세요.</div>' +
+            "</div>" +
+          "</div>" +
+        "</div></div>";
+    }
 
     return "" +
       '<div class="phone-wrap"><div class="phone">' +
@@ -1259,12 +1284,12 @@
         "</div>" +
         '<div class="phone-body">' +
           storageChipHtml(st) +
+          roleFieldHtml +
           '<div class="field worker-field">' +
             "<label>작업자 아이디</label>" +
             '<input type="text" id="fWorkerId" placeholder="예: hong123" autocomplete="off">' +
             '<label class="remember-check"><input type="checkbox" id="fWorkerRemember" checked> 이 기기에 아이디 저장</label>' +
           "</div>" +
-          '<div class="field"><label>직종</label><select id="fRole">' + roleOpts + "</select></div>" +
           '<div class="field"><label>소속팀</label><select id="fTeam">' + opts + "</select></div>" +
           '<div class="field" id="fTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="fTeamNew" placeholder="예: 박정호팀"></div>' +
           '<div class="field-row">' +
@@ -1326,18 +1351,16 @@
           "</div>" +
           '<div class="field"><label>비고</label><input type="text" id="fNote" placeholder="특이사항 메모"></div>' +
 
-          '<div id="nextDayPlanSection">' +
-            '<div class="section-title">명일 작업내용<span class="unit-note">내일 예정 작업 계획 · 계장공(팀장)만 작성</span></div>' +
-            '<div class="field-row">' +
-              '<div class="field"><label>작업구역</label><select id="fNextZone"><option value="">선택 안함</option><option value="WLP">WLP</option><option value="WT">WT</option></select></div>' +
-              '<div class="field"><label>층</label><input type="text" id="fNextFloor" placeholder="1F"></div>' +
-            "</div>" +
-            '<div class="field-row">' +
-              '<div class="field"><label>열수</label><input type="text" id="fNextRows" placeholder="예: X10~20"></div>' +
-              '<div class="field"><label>룸명</label><input type="text" id="fNextRoom" placeholder="예: 전기실"></div>' +
-            "</div>" +
-            '<div class="field"><label>작업내용</label><textarea id="fNextContent" rows="3" placeholder="명일 예정 작업 내용을 적어주세요"></textarea></div>' +
+          '<div class="section-title">명일 작업내용<span class="unit-note">내일 예정 작업 계획</span></div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label>작업구역</label><select id="fNextZone"><option value="">선택 안함</option><option value="WLP">WLP</option><option value="WT">WT</option></select></div>' +
+            '<div class="field"><label>층</label><input type="text" id="fNextFloor" placeholder="1F"></div>' +
           "</div>" +
+          '<div class="field-row">' +
+            '<div class="field"><label>열수</label><input type="text" id="fNextRows" placeholder="예: X10~20"></div>' +
+            '<div class="field"><label>룸명</label><input type="text" id="fNextRoom" placeholder="예: 전기실"></div>' +
+          "</div>" +
+          '<div class="field"><label>작업내용</label><textarea id="fNextContent" rows="3" placeholder="명일 예정 작업 내용을 적어주세요"></textarea></div>' +
 
           '<div class="section-title">작업 사진<span class="unit-note">선택 사항</span></div>' +
           '<input type="file" id="fPhotoInput" accept="image/*" multiple capture="environment" style="display:none">' +
@@ -2665,14 +2688,6 @@
     el.textContent = "합계 " + fmt(total) + "명";
   }
 
-  // "명일 작업내용"은 계장공(팀장)만 작성 — 다른 직종을 고르면 섹션 자체를 숨긴다.
-  function updateNextDayPlanVisibility() {
-    var roleEl = document.getElementById("fRole");
-    var section = document.getElementById("nextDayPlanSection");
-    if (!roleEl || !section) return;
-    section.style.display = roleEl.value === LEAD_ROLE ? "" : "none";
-  }
-
   function renderInputView() {
     document.getElementById("viewInput").innerHTML = buildInputViewHtml(state);
     var tabBtns = document.querySelectorAll("#viewInput .input-subtabs button");
@@ -2692,14 +2707,18 @@
       return;
     }
 
+    document.getElementById("fRole").addEventListener("change", function () {
+      saveWorkerRole(this.value);
+      renderInputView(); // role decides whether the rest of the entry form is even shown
+    });
+    if (getSavedWorkerRole() !== LEAD_ROLE) return; // locked view — nothing else on this tab to wire up
+
     document.getElementById("fTeam").addEventListener("change", function () {
       document.getElementById("fTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
     });
     var savedId = getSavedWorkerId();
     document.getElementById("fWorkerId").value = savedId;
     document.getElementById("fWorkerRemember").checked = true;
-    document.getElementById("fRole").addEventListener("change", updateNextDayPlanVisibility);
-    updateNextDayPlanVisibility();
     ["fRoleManager", "fRoleSupervisor", "fRoleGuide"].forEach(function (id) {
       document.getElementById(id).addEventListener("input", updatePersonnelTotal);
     });
@@ -3636,10 +3655,11 @@
       team = nv;
       if (state.teams.indexOf(team) < 0) state.teams.push(team);
     }
+    // 직종은 "실적 입력" 탭 접근 자체를 가르는 값이라, 이 저장 여부 체크박스와 상관없이 늘 기억해둔다 (선택 즉시 저장됨).
     if (document.getElementById("fWorkerRemember").checked) {
-      saveWorkerId(workerId); saveWorkerRole(role); saveWorkerTeam(team);
+      saveWorkerId(workerId); saveWorkerTeam(team);
     } else {
-      clearSavedWorkerId(); clearSavedWorkerRole(); clearSavedWorkerTeam();
+      clearSavedWorkerId(); clearSavedWorkerTeam();
     }
 
     var entry = {
