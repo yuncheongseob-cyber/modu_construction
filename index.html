@@ -947,9 +947,19 @@
       var ref = firebaseDb.ref("state");
       ref.on("value", function (snap) {
         var remote = snap.val();
-        if (remote && remote.teams) {
+        // Firebase Realtime Database silently drops empty arrays/objects (e.g. teams: [] never gets
+        // stored), so an all-empty-but-real snapshot can come back as {} or with several keys missing.
+        // Treat any non-null snapshot as real synced data — only a truly empty DB (remote === null)
+        // should fall through to seeding it from this page's embedded default state.
+        if (remote) {
           state = remote;
           if (!state.accounts) state.accounts = {};
+          if (!state.entries) state.entries = [];
+          if (!state.attendance) state.attendance = [];
+          if (!state.mandayLog) state.mandayLog = [];
+          if (!state.teams) state.teams = [];
+          if (!state.sites) state.sites = [];
+          if (!state.settings) state.settings = {};
           firebaseSyncedOnce = true;
           renderDashView(); // safe to refresh (read-only view); the input form is left alone so in-progress typing isn't wiped
           setSyncStatus(true, "실시간 동기화됨");
