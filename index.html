@@ -667,7 +667,8 @@
   var SHIFT_WEIGHT = { dawn: 0.5, day: 1, ot: 0.5, night: 1, allnight: 2 };
   var SHIFT_LABELS = { dawn: "조출 (0.5공수)", day: "주간 (1.0공수)", ot: "연장 (0.5공수)", night: "야간 (1.0공수)", allnight: "철야 (2.0공수)" };
   var SHIFT_ORDER = ["dawn", "day", "ot", "night", "allnight"];
-  var ROLE_OPTIONS = ["관리자", "계장공", "유도원"];
+  var ROLE_OPTIONS = ["관리자", "계장공", "계장공(팀장)", "유도원"];
+  var LEAD_ROLE = "계장공(팀장)"; // only this role can fill in "명일 작업내용" (next-day work plan)
   var DEFECT_TYPES = ["유형1", "유형2", "유형3", "유형4", "유형5", "유형6", "유형7", "유형8", "기타"];
   var WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -1233,8 +1234,10 @@
 
   function buildEntryFormHtml(st) {
     var teams = st.teams;
+    var savedTeam = getSavedWorkerTeam();
+    var defaultTeam = (savedTeam && teams.indexOf(savedTeam) >= 0) ? savedTeam : "";
     var opts = teams.map(function (t) {
-      return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
+      return '<option value="' + escapeHtml(t) + '"' + (t === defaultTeam ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
     var shiftOpts = SHIFT_ORDER.map(function (k) {
       return '<option value="' + k + '">' + SHIFT_LABELS[k] + "</option>";
@@ -1242,8 +1245,9 @@
     var defectOpts = '<option value="">없음</option>' + DEFECT_TYPES.map(function (t) {
       return '<option value="' + t + '">' + t + "</option>";
     }).join("");
+    var savedRole = getSavedWorkerRole();
     var roleOpts = ROLE_OPTIONS.map(function (r) {
-      return '<option value="' + r + '">' + r + "</option>";
+      return '<option value="' + r + '"' + (r === savedRole ? " selected" : "") + '>' + r + "</option>";
     }).join("");
 
     return "" +
@@ -1303,10 +1307,14 @@
             qtyInput("qCableCut", "제단", "M") + qtyInput("qCableLayout", "포설", "M") + qtyInput("qCableWire", "결선", "M") +
           "</div>" +
 
-          '<div class="section-title">계기 작업<span class="unit-note">Instrument · Y카드 · 재작업</span></div>' +
+          '<div class="section-title">계기 작업<span class="unit-note">Instrument</span></div>' +
           '<div class="qty-grid">' +
-            qtyInput("qInstPoint", "Instrument", "point") + qtyInput("qInstYcard", "Y카드", "EA") +
-            qtyInput("qInstRework", "재작업", "point") +
+            qtyInput("qInstPoint", "Instrument", "point") +
+          "</div>" +
+
+          '<div class="section-title">기타<span class="unit-note">Y카드 · 재작업</span></div>' +
+          '<div class="qty-grid">' +
+            qtyInput("qInstYcard", "Y카드", "EA") + qtyInput("qInstRework", "재작업", "point") +
           "</div>" +
 
           '<div class="section-title">품질 · 비고</div>' +
@@ -1316,16 +1324,18 @@
           "</div>" +
           '<div class="field"><label>비고</label><input type="text" id="fNote" placeholder="특이사항 메모"></div>' +
 
-          '<div class="section-title">명일 작업내용<span class="unit-note">내일 예정 작업 계획 · 선택 사항</span></div>' +
-          '<div class="field-row">' +
-            '<div class="field"><label>작업구역</label><select id="fNextZone"><option value="">선택 안함</option><option value="WLP">WLP</option><option value="WT">WT</option></select></div>' +
-            '<div class="field"><label>층</label><input type="text" id="fNextFloor" placeholder="1F"></div>' +
+          '<div id="nextDayPlanSection">' +
+            '<div class="section-title">명일 작업내용<span class="unit-note">내일 예정 작업 계획 · 계장공(팀장)만 작성</span></div>' +
+            '<div class="field-row">' +
+              '<div class="field"><label>작업구역</label><select id="fNextZone"><option value="">선택 안함</option><option value="WLP">WLP</option><option value="WT">WT</option></select></div>' +
+              '<div class="field"><label>층</label><input type="text" id="fNextFloor" placeholder="1F"></div>' +
+            "</div>" +
+            '<div class="field-row">' +
+              '<div class="field"><label>열수</label><input type="text" id="fNextRows" placeholder="예: X10~20"></div>' +
+              '<div class="field"><label>룸명</label><input type="text" id="fNextRoom" placeholder="예: 전기실"></div>' +
+            "</div>" +
+            '<div class="field"><label>작업내용</label><textarea id="fNextContent" rows="3" placeholder="명일 예정 작업 내용을 적어주세요"></textarea></div>' +
           "</div>" +
-          '<div class="field-row">' +
-            '<div class="field"><label>열수</label><input type="text" id="fNextRows" placeholder="예: X10~20"></div>' +
-            '<div class="field"><label>룸명</label><input type="text" id="fNextRoom" placeholder="예: 전기실"></div>' +
-          "</div>" +
-          '<div class="field"><label>작업내용</label><textarea id="fNextContent" rows="3" placeholder="명일 예정 작업 내용을 적어주세요"></textarea></div>' +
 
           '<div class="section-title">작업 사진<span class="unit-note">선택 사항</span></div>' +
           '<input type="file" id="fPhotoInput" accept="image/*" multiple capture="environment" style="display:none">' +
@@ -2585,6 +2595,7 @@
   function clearSavedWorkerRole() { try { localStorage.removeItem(WORKER_ROLE_KEY); } catch (e) {} }
   function getSavedWorkerTeam() { try { return localStorage.getItem(WORKER_TEAM_KEY) || ""; } catch (e) { return ""; } }
   function saveWorkerTeam(t) { try { localStorage.setItem(WORKER_TEAM_KEY, t); } catch (e) {} }
+  function clearSavedWorkerTeam() { try { localStorage.removeItem(WORKER_TEAM_KEY); } catch (e) {} }
 
   var pendingPhotos = [];
   function renderPhotoThumbs() {
@@ -2650,6 +2661,14 @@
     el.textContent = "합계 " + fmt(total) + "명";
   }
 
+  // "명일 작업내용"은 계장공(팀장)만 작성 — 다른 직종을 고르면 섹션 자체를 숨긴다.
+  function updateNextDayPlanVisibility() {
+    var roleEl = document.getElementById("fRole");
+    var section = document.getElementById("nextDayPlanSection");
+    if (!roleEl || !section) return;
+    section.style.display = roleEl.value === LEAD_ROLE ? "" : "none";
+  }
+
   function renderInputView() {
     document.getElementById("viewInput").innerHTML = buildInputViewHtml(state);
     var tabBtns = document.querySelectorAll("#viewInput .input-subtabs button");
@@ -2674,9 +2693,9 @@
     });
     var savedId = getSavedWorkerId();
     document.getElementById("fWorkerId").value = savedId;
-    var savedRole = getSavedWorkerRole();
-    if (savedRole) document.getElementById("fRole").value = savedRole;
     document.getElementById("fWorkerRemember").checked = true;
+    document.getElementById("fRole").addEventListener("change", updateNextDayPlanVisibility);
+    updateNextDayPlanVisibility();
     ["fRoleManager", "fRoleSupervisor", "fRoleGuide"].forEach(function (id) {
       document.getElementById(id).addEventListener("input", updatePersonnelTotal);
     });
@@ -3604,7 +3623,6 @@
     var workerId = document.getElementById("fWorkerId").value.trim();
     if (!workerId) { showToast("작업자 아이디를 입력해주세요"); return; }
     var role = document.getElementById("fRole").value;
-    if (document.getElementById("fWorkerRemember").checked) { saveWorkerId(workerId); saveWorkerRole(role); } else { clearSavedWorkerId(); clearSavedWorkerRole(); }
 
     var teamSel = document.getElementById("fTeam").value;
     var team = teamSel;
@@ -3613,6 +3631,11 @@
       if (!nv) { showToast("새 팀 이름을 입력해주세요"); return; }
       team = nv;
       if (state.teams.indexOf(team) < 0) state.teams.push(team);
+    }
+    if (document.getElementById("fWorkerRemember").checked) {
+      saveWorkerId(workerId); saveWorkerRole(role); saveWorkerTeam(team);
+    } else {
+      clearSavedWorkerId(); clearSavedWorkerRole(); clearSavedWorkerTeam();
     }
 
     var entry = {
@@ -3635,13 +3658,13 @@
       instrument: { point: num("qInstPoint"), ycard: num("qInstYcard"), rework: num("qInstRework") },
       defect: { qty: num("fDefectQty"), type: document.getElementById("fDefectType").value },
       note: document.getElementById("fNote").value.trim(),
-      nextDayPlan: {
+      nextDayPlan: role === LEAD_ROLE ? {
         zone: document.getElementById("fNextZone").value,
         floor: document.getElementById("fNextFloor").value.trim(),
         rows: document.getElementById("fNextRows").value.trim(),
         room: document.getElementById("fNextRoom").value.trim(),
         content: document.getElementById("fNextContent").value.trim()
-      },
+      } : null,
       photos: pendingPhotos.slice(),
       createdAt: Date.now()
     };
