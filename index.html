@@ -444,6 +444,12 @@
     font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 7px; cursor: pointer;
   }
 
+  .manday-hint {
+    font-size: 12.5px; color: var(--text-muted); background: var(--surface-2);
+    border-radius: 8px; padding: 8px 12px; margin: -6px 0 16px;
+  }
+  .manday-hint.manday-hint-empty { color: var(--bad); }
+
   .auth-tabs { display: flex; gap: 6px; margin-bottom: 16px; }
   .auth-tabs button {
     flex: 1; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
@@ -1562,6 +1568,7 @@
           '<div class="field"><label>소속팀</label><select id="fTeam">' + opts + "</select></div>" +
           '<div class="field" id="fTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="fTeamNew" placeholder="예: 박정호팀"></div>' +
           '<div class="field"><label>작업일자</label><input type="date" id="fDate" value="' + todayStr() + '"></div>' +
+          '<div class="manday-hint" id="fMandayHint"></div>' +
 
           '<div class="section-title">작업구역<span class="unit-note">현장·층·위치·작업량 · 구역이 여러 곳이면 추가할 수 있어요</span></div>' +
           '<div id="workAreaBlocks">' + buildWorkAreaBlockHtml(0) + "</div>" +
@@ -2971,6 +2978,28 @@
   }
 
   // ================= render + wire-up =================
+  // 팀장이 실적 입력을 채우는 동안, 그날 그 팀의 "내 공수 캘린더" 기록 인원을 참고용으로 보여준다.
+  // 팀장이 직접 세는 값이 아니라 팀원들이 스스로 남긴 기록이라, 공수캘린더 입력 누락을 그 자리에서 알아챌 수 있다.
+  function updateMandayHint() {
+    var hint = document.getElementById("fMandayHint");
+    if (!hint) return;
+    var teamSel = document.getElementById("fTeam");
+    var dateInput = document.getElementById("fDate");
+    if (!teamSel || !dateInput) return;
+    var team = teamSel.value === "__new__" ? (document.getElementById("fTeamNew") ? document.getElementById("fTeamNew").value.trim() : "") : teamSel.value;
+    var date = dateInput.value;
+    if (!team || !date) { hint.textContent = ""; hint.className = "manday-hint"; return; }
+    var idx = personnelIndexByTeamDate(state.mandayLog);
+    var key = idx[team + "|" + date];
+    var count = key ? key.personnel : 0;
+    if (count > 0) {
+      hint.textContent = "📋 " + date + " " + team + " · \"내 공수 캘린더\"에 기록된 인원 " + count + "명";
+      hint.className = "manday-hint";
+    } else {
+      hint.textContent = "⚠️ " + date + " " + team + " · 아직 \"내 공수 캘린더\"에 기록한 팀원이 없어요";
+      hint.className = "manday-hint manday-hint-empty";
+    }
+  }
   function renderInputView() {
     document.getElementById("viewInput").innerHTML = buildInputViewHtml(state);
 
@@ -3010,7 +3039,12 @@
 
     document.getElementById("fTeam").addEventListener("change", function () {
       document.getElementById("fTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
+      updateMandayHint();
     });
+    var fTeamNewInput = document.getElementById("fTeamNew");
+    if (fTeamNewInput) fTeamNewInput.addEventListener("input", updateMandayHint);
+    document.getElementById("fDate").addEventListener("change", updateMandayHint);
+    updateMandayHint();
     var addWorkAreaBtn = document.getElementById("btnAddWorkArea");
     if (addWorkAreaBtn) addWorkAreaBtn.addEventListener("click", function () {
       var container = document.getElementById("workAreaBlocks");
