@@ -804,6 +804,34 @@
       cbs.forEach(function (f) { f(); });
     });
   }
+  // ---- SheetJS (xlsx) / JSZip — loaded lazily only when an Excel or photo-zip export is requested ----
+  var xlsxLoaded = false, xlsxFailed = false, xlsxLoading = false, xlsxReadyCallbacks = [];
+  function ensureXlsx(cb) {
+    if (xlsxLoaded || xlsxFailed) { cb(xlsxLoaded); return; }
+    xlsxReadyCallbacks.push(cb);
+    if (xlsxLoading) return;
+    xlsxLoading = true;
+    loadScriptSeq(["https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"], function (ok) {
+      xlsxLoading = false;
+      if (ok && window.XLSX) xlsxLoaded = true; else xlsxFailed = true;
+      var cbs = xlsxReadyCallbacks; xlsxReadyCallbacks = [];
+      cbs.forEach(function (f) { f(xlsxLoaded); });
+    });
+  }
+  var jszipLoaded = false, jszipFailed = false, jszipLoading = false, jszipReadyCallbacks = [];
+  function ensureJszip(cb) {
+    if (jszipLoaded || jszipFailed) { cb(jszipLoaded); return; }
+    jszipReadyCallbacks.push(cb);
+    if (jszipLoading) return;
+    jszipLoading = true;
+    loadScriptSeq(["https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"], function (ok) {
+      jszipLoading = false;
+      if (ok && window.JSZip) jszipLoaded = true; else jszipFailed = true;
+      var cbs = jszipReadyCallbacks; jszipReadyCallbacks = [];
+      cbs.forEach(function (f) { f(jszipLoaded); });
+    });
+  }
+
   function initFirebaseSync() {
     ensureFirebase(function () {
       if (!firebaseDb) {
@@ -908,15 +936,32 @@
     });
     return rowsToCsv(rows);
   }
+  // Saves a Blob to disk. Uses the claude.ai downloads API when embedded there (artifact preview);
+  // otherwise falls back to a plain <a download> click, which is what actually works on GitHub Pages.
+  function saveBlobAsFile(blob, filename) {
+    if (downloadsApi) return downloadsApi.save({ filename: filename, data: blob });
+    return new Promise(function (resolve, reject) {
+      try {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = filename; a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        resolve();
+      } catch (e) { reject(e); }
+    });
+  }
   function downloadCsv(filenameBase, csvText) {
-    if (!downloadsApi) { showToast("이 보기에서는 다운로드를 사용할 수 없어요"); return; }
     var withBom = "﻿" + csvText;
-    downloadsApi.save({ filename: filenameBase + ".csv", data: withBom }).then(function () {
+    var blob = new Blob([withBom], { type: "text/csv;charset=utf-8" });
+    saveBlobAsFile(blob, filenameBase + ".csv").then(function () {
       showToast("다운로드했어요");
     }).catch(function (err) {
       if (err && err.code === "declined") return;
       if (err && (err.code === "rejected_extension" || err.code === "extension_not_enabled")) {
-        downloadsApi.save({ filename: filenameBase + ".txt", data: withBom }).then(function () {
+        saveBlobAsFile(blob, filenameBase + ".txt").then(function () {
           showToast(".csv 형식을 지원하지 않아 .txt로 저장했어요. 엑셀에서 열 때 파일 확장자를 .csv로 바꿔주세요");
         }).catch(function () { showToast("다운로드에 실패했어요"); });
         return;
@@ -2358,6 +2403,14 @@
     "</div>";
   }
 
+  function getAttDayRecords(st, date, teamFilter) {
+    return (st.attendance || []).filter(function (r) {
+      if (r.date !== date) return false;
+      if (teamFilter && teamFilter !== "all" && r.team !== teamFilter) return false;
+      return true;
+    }).sort(function (a, b) { return (a.clockInAt || 0) - (b.clockInAt || 0); });
+  }
+
   function buildAttendancePageHtml(st) {
     var log = st.attendance || [];
     if (!log.length) return buildAttGeoSettingsHtml(st) + emptyPanel("출퇴근 관리", '아직 출퇴근 기록이 없습니다. 작업자가 "출퇴근" 탭에서 출근·퇴근 버튼을 누르면 여기에 표시돼요.');
@@ -2380,11 +2433,7 @@
       '<div class="toolbar-group"><span class="toolbar-label">팀</span><select id="fAttTeam">' + teamOpts + "</select></div>" +
     "</div>";
 
-    var dayRecords = log.filter(function (r) {
-      if (r.date !== currentAttDate) return false;
-      if (currentAttTeamFilter !== "all" && r.team !== currentAttTeamFilter) return false;
-      return true;
-    }).sort(function (a, b) { return (a.clockInAt || 0) - (b.clockInAt || 0); });
+    var dayRecords = getAttDayRecords(st, currentAttDate, currentAttTeamFilter);
 
     function attVerifyCellHtml(loc, photo) {
       if (photo) return '<img class="att-verify-thumb" src="' + photo + '" alt="얼굴 사진">';
@@ -2412,6 +2461,8 @@
         '<div class="team-panel-head"><h2 style="margin:0">일별 출퇴근 상세</h2>' +
           '<span class="count">· ' + currentAttDate + " · 총 " + dayRecords.length + "명 기록 · 근무중 " + openCount + "명</span>" +
           '<span style="flex:1"></span>' + csvBtnHtml("출퇴근_" + currentAttDate) +
+          '<button type="button" class="csv-dl-btn" data-att-excel-btn data-att-date="' + escapeHtml(currentAttDate) + '" data-att-team="' + escapeHtml(currentAttTeamFilter) + '">⬇ 엑셀</button>' +
+          '<button type="button" class="csv-dl-btn" data-att-photos-btn data-att-date="' + escapeHtml(currentAttDate) + '" data-att-team="' + escapeHtml(currentAttTeamFilter) + '">⬇ 사진(zip)</button>' +
         "</div>" +
         (dayRecords.length ?
           '<div class="stat-table-wrap"><table class="stat-table">' +
@@ -3189,10 +3240,79 @@
     }
   }
 
+  function attVerifyLabel(loc, photo) {
+    if (photo) return "얼굴사진";
+    if (loc) return "GPS";
+    return "-";
+  }
+  function downloadAttendanceExcel(dateStr, teamFilter) {
+    var dayRecords = getAttDayRecords(state, dateStr, teamFilter);
+    if (!dayRecords.length) { showToast("이 날짜에는 출퇴근 기록이 없어요"); return; }
+    ensureXlsx(function (ok) {
+      if (!ok) { showToast("엑셀 기능을 불러오지 못했어요. 인터넷 연결을 확인해주세요"); return; }
+      var rows = [["작업자", "소속팀", "출근", "출근확인", "퇴근", "퇴근확인", "근무시간", "상태"]];
+      dayRecords.forEach(function (r) {
+        var dur = r.clockOutAt ? (r.clockOutAt - r.clockInAt) : null;
+        rows.push([
+          r.workerId, r.team, fmtHM(r.clockInAt), attVerifyLabel(r.clockInLoc, r.clockInPhoto),
+          r.clockOutAt ? fmtHM(r.clockOutAt) : "-",
+          r.clockOutAt ? attVerifyLabel(r.clockOutLoc, r.clockOutPhoto) : "-",
+          dur ? fmtDurationMs(dur) : "-",
+          r.clockOutAt ? "퇴근완료" : "근무중"
+        ]);
+      });
+      var ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 14 }, { wch: 12 }, { wch: 9 }, { wch: 10 }, { wch: 9 }, { wch: 10 }, { wch: 12 }, { wch: 10 }];
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "출퇴근");
+      var wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      var blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      saveBlobAsFile(blob, "출퇴근_" + dateStr + (teamFilter && teamFilter !== "all" ? "_" + teamFilter : "") + ".xlsx").then(function () {
+        showToast("엑셀 파일을 다운로드했어요");
+      }).catch(function (err) {
+        if (err && err.code === "declined") return;
+        showToast("다운로드에 실패했어요");
+      });
+    });
+  }
+  function downloadAttendancePhotosZip(dateStr, teamFilter) {
+    var dayRecords = getAttDayRecords(state, dateStr, teamFilter);
+    var items = [];
+    dayRecords.forEach(function (r) {
+      if (r.clockInPhoto) items.push({ name: (r.workerId || "worker") + "_출근_" + fmtHM(r.clockInAt).replace(":", "") + ".jpg", dataUrl: r.clockInPhoto });
+      if (r.clockOutPhoto) items.push({ name: (r.workerId || "worker") + "_퇴근_" + fmtHM(r.clockOutAt).replace(":", "") + ".jpg", dataUrl: r.clockOutPhoto });
+    });
+    if (!items.length) { showToast("이 날짜에는 저장된 얼굴 사진이 없어요"); return; }
+    ensureJszip(function (ok) {
+      if (!ok) { showToast("압축 기능을 불러오지 못했어요. 인터넷 연결을 확인해주세요"); return; }
+      var zip = new JSZip();
+      var folder = zip.folder(dateStr);
+      var usedNames = {};
+      items.forEach(function (it) {
+        var name = it.name;
+        if (usedNames[name]) {
+          usedNames[name]++;
+          name = name.replace(/\.jpg$/, "_" + usedNames[it.name] + ".jpg");
+        } else {
+          usedNames[name] = 1;
+        }
+        var base64 = it.dataUrl.split(",")[1] || "";
+        folder.file(name, base64, { base64: true });
+      });
+      zip.generateAsync({ type: "blob" }).then(function (blob) {
+        return saveBlobAsFile(blob, dateStr + ".zip");
+      }).then(function () {
+        showToast("사진을 zip으로 다운로드했어요. 압축을 풀면 '" + dateStr + "' 폴더가 만들어져요");
+      }).catch(function (err) {
+        if (err && err.code === "declined") return;
+        showToast("다운로드에 실패했어요");
+      });
+    });
+  }
+
   function downloadPhoto(dataUrl, filename) {
-    if (!downloadsApi) { showToast("이 보기에서는 다운로드를 사용할 수 없어요"); return; }
     fetch(dataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
-      return downloadsApi.save({ filename: filename, data: blob });
+      return saveBlobAsFile(blob, filename);
     }).then(function () {
       showToast("다운로드했어요");
     }).catch(function (err) {
@@ -3372,6 +3492,16 @@
           var table = panel ? panel.querySelector("table") : null;
           if (table) downloadCsv(csvBtn.getAttribute("data-csv-name"), tableToCsv(table));
         }
+        return;
+      }
+      var attExcelBtn = e.target.closest ? e.target.closest("[data-att-excel-btn]") : null;
+      if (attExcelBtn) {
+        downloadAttendanceExcel(attExcelBtn.getAttribute("data-att-date"), attExcelBtn.getAttribute("data-att-team"));
+        return;
+      }
+      var attPhotosBtn = e.target.closest ? e.target.closest("[data-att-photos-btn]") : null;
+      if (attPhotosBtn) {
+        downloadAttendancePhotosZip(attPhotosBtn.getAttribute("data-att-date"), attPhotosBtn.getAttribute("data-att-team"));
         return;
       }
       var verifyThumb = e.target.closest ? e.target.closest(".att-verify-thumb") : null;
