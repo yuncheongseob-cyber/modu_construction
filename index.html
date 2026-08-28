@@ -252,6 +252,15 @@
   }
   .dash-toolbar select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .dash-toolbar .toolbar-group { display: flex; align-items: center; gap: 8px; }
+  .dash-site-filter {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 10px 14px;
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px;
+  }
+  .dash-site-filter label { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+  .dash-site-filter select {
+    padding: 7px 30px 7px 12px; border: 1px solid var(--accent); border-radius: 8px;
+    background: var(--surface); color: var(--text); font-size: 13.5px; font-weight: 600; font-family: "IBM Plex Mono", monospace;
+  }
 
   .date-filter-wrap { position: relative; }
   .date-filter-btn {
@@ -1927,6 +1936,7 @@
   // ================= DASHBOARD: SIDEBAR ROUTER =================
   var currentDashPage = "overview";
   var currentDashDateFilter = "all";
+  var currentDashSiteFilter = "all"; // "all" | a site id — scopes overview/monthly/daily/team/manday/attendance/log/photos to one 현장
   var logDateFilterOpen = false;
   var dateFilterCollapsedYears = {};
   var dateFilterCollapsedMonths = {};
@@ -1961,9 +1971,35 @@
     "</div>";
   }
 
+  var SITE_SCOPED_PAGES = { overview: 1, monthly: 1, daily: 1, team: 1, manday: 1, attendance: 1, log: 1, photos: 1 };
+  function buildSiteFilterToolbarHtml(st, page) {
+    if (!SITE_SCOPED_PAGES[page] || !st.sites || !st.sites.length) return "";
+    var opts = '<option value="all"' + (currentDashSiteFilter === "all" ? " selected" : "") + '>전체 현장</option>' +
+      st.sites.map(function (s) {
+        return '<option value="' + s.id + '"' + (s.id === currentDashSiteFilter ? " selected" : "") + '>' + escapeHtml(s.name) + "</option>";
+      }).join("");
+    return '<div class="dash-site-filter"><label>현장</label><select id="dashSiteFilter">' + opts + "</select></div>";
+  }
   function buildDashViewHtml(st, page, dateFilter) {
     page = page || "overview";
     if (!isAdminUnlocked) return buildAdminLockHtml();
+    var siteToolbarHtml = buildSiteFilterToolbarHtml(st, page);
+
+    // Scope the underlying data to one 현장 for the duration of this render. Mutates the shared `st`
+    // (== the module-level `state`) so that aggregate()/monthlyAggregate()/etc — which read
+    // state.mandayLog directly rather than through a parameter — see the scoped data too, then
+    // restores it before returning so every other code path keeps seeing the full dataset.
+    var restore = null;
+    if (SITE_SCOPED_PAGES[page] && currentDashSiteFilter !== "all") {
+      var scopeSite = findSite(st, currentDashSiteFilter);
+      var scopeTeams = scopeSite ? (scopeSite.teams || []) : [];
+      restore = { entries: st.entries, mandayLog: st.mandayLog, teams: st.teams, attendance: st.attendance };
+      st.entries = (st.entries || []).filter(function (e) { return scopeTeams.indexOf(e.team) >= 0; });
+      st.mandayLog = (st.mandayLog || []).filter(function (r) { return scopeTeams.indexOf(r.team) >= 0; });
+      st.attendance = (st.attendance || []).filter(function (r) { return scopeTeams.indexOf(r.team) >= 0; });
+      st.teams = scopeTeams;
+    }
+
     var content;
     if (page === "monthly") content = buildMonthlyPageHtml(st);
     else if (page === "daily") content = buildDailyPageHtml(st);
@@ -1976,8 +2012,16 @@
     else if (page === "settings") content = buildSettingsPageHtml(st);
     else if (page === "storage") content = buildStoragePanelHtml(st);
     else content = buildOverviewPageHtml(st);
+
+    if (restore) {
+      st.entries = restore.entries;
+      st.mandayLog = restore.mandayLog;
+      st.attendance = restore.attendance;
+      st.teams = restore.teams;
+    }
+
     return '<div class="dash-shell"><nav class="dash-sidebar">' + buildDashSidebarHtml(page) + "</nav>" +
-      '<div class="dash-content">' + content + "</div></div>";
+      '<div class="dash-content">' + siteToolbarHtml + content + "</div></div>";
   }
 
   // ---- overview page ----
@@ -3783,6 +3827,18 @@
     wireSettingsPage();
     wireSitesPage();
     wireStoragePanel();
+    var dashSiteFilterEl = document.getElementById("dashSiteFilter");
+    if (dashSiteFilterEl) {
+      dashSiteFilterEl.addEventListener("change", function () {
+        currentDashSiteFilter = this.value;
+        currentOverviewMonth = null;
+        currentDailyMonth = null;
+        currentMandayMonth = null;
+        currentTeamDateFilter = null;
+        currentLogTeamFilter = "all";
+        renderDashView();
+      });
+    }
     var dateSearchInput = document.getElementById("dateFilterSearchInput");
     if (dateSearchInput) {
       dateSearchInput.addEventListener("input", function () {
