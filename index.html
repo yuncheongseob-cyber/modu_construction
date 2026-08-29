@@ -732,6 +732,11 @@
   if (!state || !state.teams) { state = { teams: ["김춘식팀", "이중화팀"], entries: [] }; }
   if (!state.accounts) state.accounts = {};
   if (!state.sites) state.sites = []; // 현장 관리: {id, name, company, address, teams:[...], createdAt}
+  // 자재관리: 별도의 품목 마스터 목록 없이, 발주서(purchaseOrders)의 각 줄(품목/규격/수량)이 자재 정체성을 결정한다.
+  // 재고는 별도로 저장하지 않고, materialTx(입고/배부/사용 이벤트 로그)를 합산해서 그때그때 계산한다.
+  if (!state.purchaseOrders) state.purchaseOrders = []; // {id, siteId, siteName, vendor, orderDate, expectedDate, status:"발주됨"|"입고완료", items:[{name,spec,qty,unit}], createdBy, createdAt}
+  if (!state.materialTx) state.materialTx = []; // {id, siteId, type:"receive"|"distribute"|"use", name, spec, qty, team, poId, note, workerId, createdAt}
+  if (!state.materialRequests) state.materialRequests = []; // {id, siteId, team, name, spec, qty, note, status:"대기"|"충족"|"발주전환", requestedBy, createdAt, resolvedAt}
 
   var TEAM_COLORS = ["#E8630A", "#2E7D4F", "#3B6FB6", "#A8720A", "#8C4FBF", "#C4432B"];
   function teamColor(teams, name) {
@@ -774,6 +779,37 @@
   function sitesForCompany(st, company) {
     return (st.sites || []).filter(function (s) { return (s.company || "") === company; });
   }
+
+  // ---- 자재관리 helpers ----
+  // 품목 정체성은 (품목명, 규격) 쌍으로만 결정한다 (별도 마스터 목록 없음, 발주서 줄에서 그대로 가져옴).
+  function materialKey(name, spec) { return (name || "").trim() + "||" + (spec || "").trim(); }
+  // 창고 재고: 그 현장의 모든 입고(+)와 배부(-) 이벤트를 합산해서 계산한다 (실시간으로 다시 계산되므로 별도 저장 없음).
+  function computeWarehouseStock(st, siteId) {
+    var map = {};
+    (st.materialTx || []).forEach(function (tx) {
+      if (tx.siteId !== siteId) return;
+      var k = materialKey(tx.name, tx.spec);
+      if (!map[k]) map[k] = { name: tx.name, spec: tx.spec, unit: tx.unit || "", qty: 0 };
+      if (tx.type === "receive") map[k].qty += Number(tx.qty) || 0;
+      else if (tx.type === "distribute") map[k].qty -= Number(tx.qty) || 0;
+    });
+    return map;
+  }
+  // 팀별 보유 재고: 그 팀으로 배부된(+) 것에서 사용(-)한 것을 뺀 값.
+  function computeTeamStock(st, siteId, team) {
+    var map = {};
+    (st.materialTx || []).forEach(function (tx) {
+      if (tx.siteId !== siteId || tx.team !== team) return;
+      var k = materialKey(tx.name, tx.spec);
+      if (!map[k]) map[k] = { name: tx.name, spec: tx.spec, unit: tx.unit || "", qty: 0 };
+      if (tx.type === "distribute") map[k].qty += Number(tx.qty) || 0;
+      else if (tx.type === "use") map[k].qty -= Number(tx.qty) || 0;
+    });
+    return map;
+  }
+  function stockMapToList(map) {
+    return Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+  }
   function getDefectTypeOptions(st) { return (st.settings && st.settings.defectTypes && st.settings.defectTypes.length) ? st.settings.defectTypes : DEFAULT_DEFECT_TYPES; }
   function ensureSettingsList(key) {
     if (!state.settings) state.settings = {};
@@ -795,6 +831,7 @@
     { key: "log", icon: "📋", label: "실적 로그" },
     { key: "photos", icon: "🖼", label: "작업 사진" },
     { key: "sites", icon: "🏗️", label: "현장 관리" },
+    { key: "materials", icon: "📦", label: "자재관리" },
     { key: "settings", icon: "⚙️", label: "항목 설정" },
     { key: "storage", icon: "💾", label: "저장공간" }
   ];
@@ -970,6 +1007,9 @@
           if (!state.teams) state.teams = [];
           if (!state.sites) state.sites = [];
           if (!state.settings) state.settings = {};
+          if (!state.purchaseOrders) state.purchaseOrders = [];
+          if (!state.materialTx) state.materialTx = [];
+          if (!state.materialRequests) state.materialRequests = [];
           firebaseSyncedOnce = true;
           renderDashView(); // safe to refresh (read-only view); the input form is left alone so in-progress typing isn't wiped
           setSyncStatus(true, "실시간 동기화됨");
@@ -1518,14 +1558,24 @@
   function buildInputViewHtml(st) {
     if (!isLoggedIn(st)) return buildAuthGateHtml(st);
     var account = currentAccount();
+    var isWarehouse = account.role === WAREHOUSE_ROLE;
+    var isLead = account.role === LEAD_ROLE;
     var acctBarHtml = buildAccountBarHtml(account);
-    var tabsHtml = '<div class="input-subtabs">' +
-      '<button type="button" class="' + (currentInputTab === "entry" ? "active" : "") + '" data-itab="entry">📋 실적 입력</button>' +
-      '<button type="button" class="' + (currentInputTab === "manday" ? "active" : "") + '" data-itab="manday">🧾 내 공수 캘린더</button>' +
-      '<button type="button" class="' + (currentInputTab === "attendance" ? "active" : "") + '" data-itab="attendance">⏰ 출퇴근</button>' +
-    "</div>";
+    if (isWarehouse && currentInputTab !== "materials" && currentInputTab !== "attendance") currentInputTab = "materials";
+    var tabBtnsHtml = "";
+    if (!isWarehouse) {
+      tabBtnsHtml += '<button type="button" class="' + (currentInputTab === "entry" ? "active" : "") + '" data-itab="entry">📋 실적 입력</button>' +
+        '<button type="button" class="' + (currentInputTab === "manday" ? "active" : "") + '" data-itab="manday">🧾 내 공수 캘린더</button>';
+    }
+    tabBtnsHtml += '<button type="button" class="' + (currentInputTab === "attendance" ? "active" : "") + '" data-itab="attendance">⏰ 출퇴근</button>';
+    if (isWarehouse || isLead) {
+      tabBtnsHtml += '<button type="button" class="' + (currentInputTab === "materials" ? "active" : "") + '" data-itab="materials">📦 자재</button>';
+    }
+    var tabsHtml = '<div class="input-subtabs">' + tabBtnsHtml + "</div>";
     var body = currentInputTab === "manday" ? buildMandayCalendarHtml(st) :
-      currentInputTab === "attendance" ? buildAttendanceViewHtml(st) : buildEntryFormHtml(st);
+      currentInputTab === "attendance" ? buildAttendanceViewHtml(st) :
+      currentInputTab === "materials" ? (isWarehouse ? buildWarehouseMaterialsHtml(st, account) : buildLeadMaterialsHtml(st, account)) :
+      buildEntryFormHtml(st);
     return acctBarHtml + tabsHtml + body;
   }
 
@@ -1959,6 +2009,106 @@
   var currentMandayMonth = null;
   var editingEntryId = null;
 
+  // ---- 자재관리 (창고장 화면): PO 입고 처리, 팀별 배부, 팀 요청 처리 ----
+  function buildWarehouseMaterialsHtml(st, account) {
+    var siteId = account.siteId;
+    if (!siteId) return emptyPanel("자재관리", "소속 현장이 없어요. 관리자에게 문의해주세요.");
+    var site = findSite(st, siteId);
+    var incomingPos = (st.purchaseOrders || []).filter(function (p) { return p.siteId === siteId && p.status !== "입고완료"; })
+      .sort(function (a, b) { return (a.expectedDate || "").localeCompare(b.expectedDate || ""); });
+    var incomingHtml = incomingPos.length ? incomingPos.map(function (po) {
+      var itemsSummary = (po.items || []).map(function (it) { return escapeHtml(it.name) + (it.spec ? "(" + escapeHtml(it.spec) + ")" : "") + " " + it.qty + (it.unit || ""); }).join(", ");
+      return '<tr><td>' + escapeHtml(po.vendor || "") + "</td><td>" + escapeHtml(po.expectedDate || "") + "</td><td>" + itemsSummary + "</td>" +
+        '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-wh-receive="' + po.id + '">입고 처리</button></td></tr>';
+    }).join("") : '<tr><td colspan="4" class="empty-state">입고 대기 중인 발주가 없어요</td></tr>';
+
+    var stockList = stockMapToList(computeWarehouseStock(st, siteId));
+    var stockOptsHtml = stockList.map(function (r) {
+      return '<option value="' + materialKey(r.name, r.spec) + '" data-max="' + r.qty + '" data-unit="' + escapeHtml(r.unit) + '">' + escapeHtml(r.name) + (r.spec ? " (" + escapeHtml(r.spec) + ")" : "") + " — 재고 " + r.qty + escapeHtml(r.unit) + "</option>";
+    }).join("");
+    var stockRowsHtml = stockList.length ? stockList.map(function (r) {
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + " " + escapeHtml(r.unit) + "</td></tr>";
+    }).join("") : '<tr><td colspan="3" class="empty-state">재고가 없어요</td></tr>';
+
+    var teams = (site && site.teams) || [];
+    var teamOptsHtml = teams.map(function (t) { return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>"; }).join("");
+
+    var pendingReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === siteId && r.status === "대기"; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var reqRowsHtml = pendingReqs.length ? pendingReqs.map(function (r) {
+      return '<tr><td>' + escapeHtml(r.team || "") + "</td><td>" + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + " " + escapeHtml(r.unit || "") + "</td><td>" + escapeHtml(r.note || "") + "</td>" +
+        '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-wh-fulfill="' + r.id + '">재고로 지급</button> ' +
+        '<button type="button" class="account-bar-btn" data-wh-topo="' + r.id + '">발주 필요</button></td></tr>';
+    }).join("") : '<tr><td colspan="6" class="empty-state">대기 중인 요청이 없어요</td></tr>';
+
+    return '<div class="panel-caption" style="margin:-4px 0 14px">📦 ' + escapeHtml(site ? site.name : "") + " 창고를 관리해요. 발주 입고 → 팀 배부 → 팀 요청 처리 순서로 진행해요.</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">입고 대기 발주</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>업체</th><th>납기일</th><th>품목</th><th></th></tr></thead><tbody>' + incomingHtml + "</tbody></table></div>" +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">팀에 배부하기</h2>' +
+        (stockList.length ? (
+          '<div class="field"><label>품목 선택</label><select id="whDistItem">' + stockOptsHtml + "</select></div>" +
+          '<div class="field-row">' +
+            '<div class="field"><label>배부할 팀</label><select id="whDistTeam">' + teamOptsHtml + "</select></div>" +
+            '<div class="field" style="max-width:140px"><label>수량</label><input type="number" id="whDistQty" min="0" placeholder="0"></div>' +
+          "</div>" +
+          '<button type="button" class="submit-btn" id="btnWhDist">배부하기</button>'
+        ) : '<div class="empty-state">배부할 재고가 없어요. 먼저 발주를 입고 처리해주세요.</div>') +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">창고 재고</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">팀 요청</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+      "</div>";
+  }
+
+  // ---- 자재관리 (팀장 화면): 우리팀 보유 재고, 사용 기록, 부족분 요청 ----
+  function buildLeadMaterialsHtml(st, account) {
+    var siteId = account.siteId;
+    var team = account.team;
+    if (!siteId || !team) return emptyPanel("자재", "소속 현장/팀 정보가 없어요. 관리자에게 문의해주세요.");
+    var stockList = stockMapToList(computeTeamStock(st, siteId, team));
+    var stockOptsHtml = stockList.filter(function (r) { return r.qty > 0; }).map(function (r) {
+      return '<option value="' + materialKey(r.name, r.spec) + '" data-max="' + r.qty + '" data-unit="' + escapeHtml(r.unit) + '">' + escapeHtml(r.name) + (r.spec ? " (" + escapeHtml(r.spec) + ")" : "") + " — 보유 " + r.qty + escapeHtml(r.unit) + "</option>";
+    }).join("");
+    var stockRowsHtml = stockList.length ? stockList.map(function (r) {
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + " " + escapeHtml(r.unit) + "</td></tr>";
+    }).join("") : '<tr><td colspan="3" class="empty-state">보유 중인 자재가 없어요</td></tr>';
+
+    var myReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === siteId && r.team === team; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var reqRowsHtml = myReqs.length ? myReqs.map(function (r) {
+      var statusHtml = r.status === "대기" ? '<span class="settings-tag">대기</span>' :
+        r.status === "충족" ? '<span class="settings-tag" style="color:var(--good)">지급완료</span>' :
+        '<span class="settings-tag" style="color:var(--accent)">발주전환</span>';
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + " " + escapeHtml(r.unit || "") + "</td><td>" + statusHtml + "</td></tr>";
+    }).join("") : '<tr><td colspan="4" class="empty-state">요청 내역이 없어요</td></tr>';
+
+    return '<div class="panel-caption" style="margin:-4px 0 14px">📦 우리 팀(' + escapeHtml(team) + ") 보유 자재를 확인하고, 사용 기록·부족분 요청을 여기서 해요.</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">우리 팀 보유 재고</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">오늘 사용 기록</h2>' +
+        (stockOptsHtml ? (
+          '<div class="field"><label>품목 선택</label><select id="leadUseItem">' + stockOptsHtml + "</select></div>" +
+          '<div class="field" style="max-width:140px"><label>사용 수량</label><input type="number" id="leadUseQty" min="0" placeholder="0"></div>' +
+          '<button type="button" class="submit-btn" id="btnLeadUse">사용 기록</button>'
+        ) : '<div class="empty-state">기록할 보유 재고가 없어요</div>') +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">부족·추가 자재 요청</h2>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>품목</label><input type="text" id="leadReqName" placeholder="예: H형강"></div>' +
+          '<div class="field"><label>규격</label><input type="text" id="leadReqSpec" placeholder="예: 200x200"></div>' +
+          '<div class="field" style="max-width:110px"><label>수량</label><input type="number" id="leadReqQty" min="0" placeholder="0"></div>' +
+          '<div class="field" style="max-width:90px"><label>단위</label><input type="text" id="leadReqUnit" placeholder="EA"></div>' +
+        "</div>" +
+        '<div class="field"><label>메모</label><input type="text" id="leadReqNote" placeholder="선택 입력"></div>' +
+        '<button type="button" class="submit-btn" id="btnLeadReq">요청 보내기</button>' +
+        '<div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>상태</th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+      "</div>";
+  }
+
   function buildDashSidebarHtml(active) {
     return NAV_ITEMS.map(function (item) {
       return '<button type="button" class="' + (item.key === active ? "active" : "") + '" data-page="' + item.key + '">' +
@@ -2014,6 +2164,7 @@
     else if (page === "log") content = buildLogPageHtml(st, dateFilter || "all");
     else if (page === "photos") content = buildPhotoGalleryHtml(st.entries, st.teams);
     else if (page === "sites") content = buildSitesPageHtml(st);
+    else if (page === "materials") content = buildMaterialsPageHtml(st);
     else if (page === "settings") content = buildSettingsPageHtml(st);
     else if (page === "storage") content = buildStoragePanelHtml(st);
     else content = buildOverviewPageHtml(st);
@@ -2953,6 +3104,7 @@
 
   // ---- sites page (현장 관리: company registry, workers pick a site at signup) ----
   var sitesSearchQuery = "";
+  var currentMaterialsSiteId = "";
   function buildSiteCardHtml(s) {
     var teamsHtml = (s.teams && s.teams.length) ? s.teams.map(function (t, i) {
       return '<span class="settings-tag">' + escapeHtml(t) +
@@ -3049,6 +3201,149 @@
         if (!site || !site.teams || isNaN(idx) || idx < 0 || idx >= site.teams.length) return;
         site.teams.splice(idx, 1);
         persist(function (ok) { if (ok) { showToast("삭제됐어요"); renderDashView(); } });
+      });
+    });
+  }
+  // ---- 자재관리 (관리자 대시보드) ----
+  function buildPoItemRowHtml(idx) {
+    return '<div class="field-row po-item-row" data-po-item-idx="' + idx + '">' +
+      '<div class="field" style="margin:0"><label>품목</label><input type="text" data-po-role="name" placeholder="예: H형강"></div>' +
+      '<div class="field" style="margin:0"><label>규격</label><input type="text" data-po-role="spec" placeholder="예: 200x200"></div>' +
+      '<div class="field" style="margin:0;max-width:110px"><label>수량</label><input type="number" data-po-role="qty" placeholder="0" min="0"></div>' +
+      '<div class="field" style="margin:0;max-width:90px"><label>단위</label><input type="text" data-po-role="unit" placeholder="EA"></div>' +
+      (idx > 0 ? '<button type="button" class="settings-tag-remove" style="margin-top:22px" data-po-item-remove="1">✕</button>' : "") +
+    "</div>";
+  }
+  function buildMaterialsPageHtml(st) {
+    var sites = st.sites || [];
+    if (!currentMaterialsSiteId && sites.length) currentMaterialsSiteId = sites[0].id;
+    var siteOptsHtml = sites.map(function (s) {
+      return '<option value="' + s.id + '"' + (s.id === currentMaterialsSiteId ? " selected" : "") + '>' + escapeHtml(s.name) + "</option>";
+    }).join("");
+    if (!sites.length) return '<div class="empty-state">먼저 "현장 관리"에서 현장을 등록해주세요.</div>';
+
+    var pos = (st.purchaseOrders || []).slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var poRowsHtml = pos.length ? pos.map(function (po) {
+      var itemsSummary = (po.items || []).map(function (it) { return escapeHtml(it.name) + (it.spec ? "(" + escapeHtml(it.spec) + ")" : "") + " " + it.qty + (it.unit || ""); }).join(", ");
+      var statusBadge = po.status === "입고완료" ? '<span class="settings-tag" style="color:var(--good)">입고완료</span>' : '<span class="settings-tag" style="color:var(--accent)">발주됨</span>';
+      var receiveBtn = po.status !== "입고완료" ? '<button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-po-receive="' + po.id + '">입고 처리</button>' : "";
+      return '<tr>' +
+        '<td>' + escapeHtml(po.siteName || "") + "</td>" +
+        '<td>' + escapeHtml(po.vendor || "") + "</td>" +
+        '<td>' + escapeHtml(po.orderDate || "") + "</td>" +
+        '<td>' + escapeHtml(po.expectedDate || "") + "</td>" +
+        '<td>' + itemsSummary + "</td>" +
+        '<td>' + statusBadge + "</td>" +
+        '<td>' + receiveBtn + "</td>" +
+      "</tr>";
+    }).join("") : '<tr><td colspan="7" class="empty-state">아직 등록된 발주서가 없어요</td></tr>';
+
+    var stockList = stockMapToList(computeWarehouseStock(st, currentMaterialsSiteId));
+    var stockRowsHtml = stockList.length ? stockList.map(function (r) {
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + " " + escapeHtml(r.unit) + "</td></tr>";
+    }).join("") : '<tr><td colspan="3" class="empty-state">재고가 없어요</td></tr>';
+
+    var pendingReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === currentMaterialsSiteId && r.status === "대기"; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var reqRowsHtml = pendingReqs.length ? pendingReqs.map(function (r) {
+      return '<tr>' +
+        '<td>' + escapeHtml(r.team || "") + "</td>" +
+        '<td>' + escapeHtml(r.name) + "</td>" +
+        '<td>' + escapeHtml(r.spec || "") + "</td>" +
+        '<td>' + r.qty + " " + escapeHtml(r.unit || "") + "</td>" +
+        '<td>' + escapeHtml(r.note || "") + "</td>" +
+        '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-req-topo="' + r.id + '">발주로 전환</button></td>' +
+      "</tr>";
+    }).join("") : '<tr><td colspan="6" class="empty-state">대기 중인 요청이 없어요</td></tr>';
+
+    return '<div class="panel-caption" style="margin:-4px 0 14px">발주서 → 창고 입고 → 팀별 배부 → 사용/잔여관리 → 요청 순으로 돌아가는 자재 흐름을 여기서 관리해요.</div>' +
+      '<div class="panel">' +
+        '<div class="field" style="margin:0"><label>현장</label><select id="matSiteSelect">' + siteOptsHtml + "</select></div>" +
+      "</div>" +
+      '<div class="panel">' +
+        '<h2 style="margin:0 0 10px">새 발주서 등록</h2>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>업체명</label><input type="text" id="poVendor" placeholder="예: 대한자재(주)"></div>' +
+          '<div class="field"><label>발주일</label><input type="date" id="poOrderDate"></div>' +
+          '<div class="field"><label>납기일</label><input type="date" id="poExpectedDate"></div>' +
+        "</div>" +
+        '<div class="section-title" style="margin:10px 0 8px">품목</div>' +
+        '<div id="poItemBlocks">' + buildPoItemRowHtml(0) + "</div>" +
+        '<button type="button" class="account-bar-btn" id="btnPoAddItem" style="margin-top:8px">+ 품목 추가</button>' +
+        '<div><button type="button" class="submit-btn" id="btnPoSubmit" style="margin-top:14px">발주서 등록</button></div>' +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">발주서 목록</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>현장</th><th>업체</th><th>발주일</th><th>납기일</th><th>품목</th><th>상태</th><th></th></tr></thead><tbody>' + poRowsHtml + "</tbody></table></div>" +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">창고 재고 (선택한 현장)</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">대기 중인 자재 요청</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+      "</div>";
+  }
+  function collectPoItems() {
+    var items = [];
+    Array.prototype.forEach.call(document.querySelectorAll(".po-item-row"), function (row) {
+      var name = (row.querySelector('[data-po-role="name"]').value || "").trim();
+      var spec = (row.querySelector('[data-po-role="spec"]').value || "").trim();
+      var qty = parseFloat(row.querySelector('[data-po-role="qty"]').value) || 0;
+      var unit = (row.querySelector('[data-po-role="unit"]').value || "").trim();
+      if (name && qty > 0) items.push({ name: name, spec: spec, qty: qty, unit: unit });
+    });
+    return items;
+  }
+  function wireMaterialsPage() {
+    var siteSel = document.getElementById("matSiteSelect");
+    if (siteSel) siteSel.addEventListener("change", function () { currentMaterialsSiteId = this.value; renderDashView(); });
+    var addItemBtn = document.getElementById("btnPoAddItem");
+    if (addItemBtn) addItemBtn.addEventListener("click", function () {
+      var container = document.getElementById("poItemBlocks");
+      var idx = container.querySelectorAll(".po-item-row").length;
+      container.insertAdjacentHTML("beforeend", buildPoItemRowHtml(idx));
+    });
+    var itemBlocks = document.getElementById("poItemBlocks");
+    if (itemBlocks) itemBlocks.addEventListener("click", function (ev) {
+      if (ev.target && ev.target.getAttribute("data-po-item-remove")) {
+        var row = ev.target.closest(".po-item-row");
+        if (row) row.parentNode.removeChild(row);
+      }
+    });
+    var poSubmitBtn = document.getElementById("btnPoSubmit");
+    if (poSubmitBtn) poSubmitBtn.addEventListener("click", function () {
+      var site = findSite(state, currentMaterialsSiteId);
+      if (!site) { showToast("현장을 선택해주세요"); return; }
+      var vendor = document.getElementById("poVendor").value.trim();
+      var orderDate = document.getElementById("poOrderDate").value;
+      var expectedDate = document.getElementById("poExpectedDate").value;
+      var items = collectPoItems();
+      if (!vendor) { showToast("업체명을 입력해주세요"); return; }
+      if (!items.length) { showToast("품목을 1개 이상 입력해주세요 (품목명과 수량 필수)"); return; }
+      state.purchaseOrders.push({ id: uid(), siteId: site.id, siteName: site.name, vendor: vendor, orderDate: orderDate, expectedDate: expectedDate, status: "발주됨", items: items, createdAt: Date.now() });
+      persist(function (ok) { if (ok) { showToast("발주서가 등록됐어요"); renderDashView(); } });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-po-receive]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-po-receive");
+        var po = (state.purchaseOrders || []).filter(function (p) { return p.id === id; })[0];
+        if (!po || po.status === "입고완료") return;
+        (po.items || []).forEach(function (it) {
+          state.materialTx.push({ id: uid(), siteId: po.siteId, type: "receive", name: it.name, spec: it.spec, qty: it.qty, unit: it.unit, poId: po.id, createdAt: Date.now() });
+        });
+        po.status = "입고완료";
+        persist(function (ok) { if (ok) { showToast("입고 처리됐어요"); renderDashView(); } });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-req-topo]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-req-topo");
+        var req = (state.materialRequests || []).filter(function (r) { return r.id === id; })[0];
+        if (!req) return;
+        var site = findSite(state, req.siteId);
+        state.purchaseOrders.push({ id: uid(), siteId: req.siteId, siteName: site ? site.name : "", vendor: "", orderDate: "", expectedDate: "", status: "발주됨", items: [{ name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "" }], createdAt: Date.now(), fromRequestId: req.id });
+        req.status = "발주전환";
+        req.resolvedAt = Date.now();
+        persist(function (ok) { if (ok) { showToast("발주서로 전환됐어요"); renderDashView(); } });
       });
     });
   }
@@ -3287,6 +3582,12 @@
       wireAttendanceView();
       return;
     }
+    if (currentInputTab === "materials") {
+      var matAccount = currentAccount();
+      if (matAccount && matAccount.role === WAREHOUSE_ROLE) wireWarehouseMaterials();
+      else wireLeadMaterials();
+      return;
+    }
 
     var account = currentAccount();
     if (!account || account.role !== LEAD_ROLE) return; // locked view — nothing else on this tab to wire up
@@ -3414,6 +3715,97 @@
     var s = attLocationState;
     if (s.status !== "ok") return null;
     return { lat: s.lat, lng: s.lng, accuracy: s.accuracy, distance: Math.round(s.distance) };
+  }
+
+  function wireWarehouseMaterials() {
+    var account = currentAccount();
+    if (!account || !account.siteId) return;
+    var siteId = account.siteId;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-wh-receive]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-wh-receive");
+        var po = (state.purchaseOrders || []).filter(function (p) { return p.id === id; })[0];
+        if (!po || po.status === "입고완료") return;
+        (po.items || []).forEach(function (it) {
+          state.materialTx.push({ id: uid(), siteId: po.siteId, type: "receive", name: it.name, spec: it.spec, qty: it.qty, unit: it.unit, poId: po.id, workerId: account.workerId, createdAt: Date.now() });
+        });
+        po.status = "입고완료";
+        persist(function (ok) { if (ok) { showToast("입고 처리됐어요"); renderInputView(); } });
+      });
+    });
+    var distBtn = document.getElementById("btnWhDist");
+    if (distBtn) distBtn.addEventListener("click", function () {
+      var itemSel = document.getElementById("whDistItem");
+      var teamSel = document.getElementById("whDistTeam");
+      var qty = parseFloat(document.getElementById("whDistQty").value) || 0;
+      if (!itemSel || !itemSel.value) { showToast("품목을 선택해주세요"); return; }
+      if (!teamSel || !teamSel.value) { showToast("배부할 팀을 선택해주세요"); return; }
+      if (qty <= 0) { showToast("수량을 입력해주세요"); return; }
+      var opt = itemSel.options[itemSel.selectedIndex];
+      var max = parseFloat(opt.getAttribute("data-max")) || 0;
+      if (qty > max) { showToast("창고 재고보다 많이 배부할 수 없어요 (재고 " + max + ")"); return; }
+      var parts = itemSel.value.split("||");
+      state.materialTx.push({ id: uid(), siteId: siteId, type: "distribute", name: parts[0], spec: parts[1], qty: qty, unit: opt.getAttribute("data-unit") || "", team: teamSel.value, workerId: account.workerId, createdAt: Date.now() });
+      persist(function (ok) { if (ok) { showToast("배부됐어요"); renderInputView(); } });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-wh-fulfill]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-wh-fulfill");
+        var req = (state.materialRequests || []).filter(function (r) { return r.id === id; })[0];
+        if (!req) return;
+        var stock = computeWarehouseStock(state, siteId);
+        var have = stock[materialKey(req.name, req.spec)];
+        var haveQty = have ? have.qty : 0;
+        if (haveQty < req.qty) { showToast("창고 재고가 부족해요 (재고 " + haveQty + ")"); return; }
+        state.materialTx.push({ id: uid(), siteId: siteId, type: "distribute", name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "", team: req.team, workerId: account.workerId, createdAt: Date.now() });
+        req.status = "충족";
+        req.resolvedAt = Date.now();
+        persist(function (ok) { if (ok) { showToast("지급 처리됐어요"); renderInputView(); } });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-wh-topo]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-wh-topo");
+        var req = (state.materialRequests || []).filter(function (r) { return r.id === id; })[0];
+        if (!req) return;
+        var site = findSite(state, req.siteId);
+        state.purchaseOrders.push({ id: uid(), siteId: req.siteId, siteName: site ? site.name : "", vendor: "", orderDate: "", expectedDate: "", status: "발주됨", items: [{ name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "" }], createdAt: Date.now(), fromRequestId: req.id });
+        req.status = "발주전환";
+        req.resolvedAt = Date.now();
+        persist(function (ok) { if (ok) { showToast("발주가 필요하다고 표시했어요. 관리자가 발주를 진행할 거예요"); renderInputView(); } });
+      });
+    });
+  }
+
+  function wireLeadMaterials() {
+    var account = currentAccount();
+    if (!account || !account.siteId || !account.team) return;
+    var siteId = account.siteId, team = account.team;
+    var useBtn = document.getElementById("btnLeadUse");
+    if (useBtn) useBtn.addEventListener("click", function () {
+      var itemSel = document.getElementById("leadUseItem");
+      var qty = parseFloat(document.getElementById("leadUseQty").value) || 0;
+      if (!itemSel || !itemSel.value) { showToast("품목을 선택해주세요"); return; }
+      if (qty <= 0) { showToast("사용 수량을 입력해주세요"); return; }
+      var opt = itemSel.options[itemSel.selectedIndex];
+      var max = parseFloat(opt.getAttribute("data-max")) || 0;
+      if (qty > max) { showToast("보유 수량보다 많이 사용할 수 없어요 (보유 " + max + ")"); return; }
+      var parts = itemSel.value.split("||");
+      state.materialTx.push({ id: uid(), siteId: siteId, type: "use", name: parts[0], spec: parts[1], qty: qty, unit: opt.getAttribute("data-unit") || "", team: team, workerId: account.workerId, createdAt: Date.now() });
+      persist(function (ok) { if (ok) { showToast("사용 기록을 저장했어요"); renderInputView(); } });
+    });
+    var reqBtn = document.getElementById("btnLeadReq");
+    if (reqBtn) reqBtn.addEventListener("click", function () {
+      var name = document.getElementById("leadReqName").value.trim();
+      var spec = document.getElementById("leadReqSpec").value.trim();
+      var qty = parseFloat(document.getElementById("leadReqQty").value) || 0;
+      var unit = document.getElementById("leadReqUnit").value.trim();
+      var note = document.getElementById("leadReqNote").value.trim();
+      if (!name) { showToast("품목을 입력해주세요"); return; }
+      if (qty <= 0) { showToast("수량을 입력해주세요"); return; }
+      state.materialRequests.push({ id: uid(), siteId: siteId, team: team, name: name, spec: spec, qty: qty, unit: unit, note: note, status: "대기", requestedBy: account.workerId, createdAt: Date.now() });
+      persist(function (ok) { if (ok) { showToast("요청을 보냈어요"); renderInputView(); } });
+    });
   }
 
   // ---- GPS-fallback face photo verification (mobile camera only, no gallery, no PC) ----
@@ -3843,6 +4235,7 @@
     }
     wireSettingsPage();
     wireSitesPage();
+    wireMaterialsPage();
     wireStoragePanel();
     var dashSiteFilterEl = document.getElementById("dashSiteFilter");
     if (dashSiteFilterEl) {
