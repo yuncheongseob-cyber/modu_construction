@@ -3250,21 +3250,19 @@
     }).join("");
     if (!sites.length) return '<div class="empty-state">먼저 "현장 관리"에서 현장을 등록해주세요.</div>';
 
-    var pos = (st.purchaseOrders || []).slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var pos = (st.purchaseOrders || []).filter(function (p) { return p.siteId === currentMaterialsSiteId; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     var poRowsHtml = pos.length ? pos.map(function (po) {
       var itemsSummary = (po.items || []).map(function (it) { return escapeHtml(it.name) + (it.spec ? "(" + escapeHtml(it.spec) + ")" : "") + " " + it.qty + (it.unit || ""); }).join(", ");
-      var statusBadge = po.status === "입고완료" ? '<span class="settings-tag" style="color:var(--good)">입고완료</span>' : '<span class="settings-tag" style="color:var(--accent)">발주됨</span>';
-      var receiveBtn = po.status !== "입고완료" ? '<button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-po-receive="' + po.id + '">입고 처리</button>' : "";
+      var statusBadge = po.status === "입고완료" ? '<span class="settings-tag" style="color:var(--good)">입고완료</span>' : '<span class="settings-tag" style="color:var(--accent)">발주됨 (창고장 입고 확인 대기)</span>';
       return '<tr>' +
-        '<td>' + escapeHtml(po.siteName || "") + "</td>" +
         '<td>' + escapeHtml(po.vendor || "") + "</td>" +
         '<td>' + escapeHtml(po.orderDate || "") + "</td>" +
         '<td>' + escapeHtml(po.expectedDate || "") + "</td>" +
         '<td>' + itemsSummary + "</td>" +
         '<td>' + statusBadge + "</td>" +
-        '<td>' + receiveBtn + "</td>" +
       "</tr>";
-    }).join("") : '<tr><td colspan="7" class="empty-state">아직 등록된 발주서가 없어요</td></tr>';
+    }).join("") : '<tr><td colspan="5" class="empty-state">아직 등록된 발주서가 없어요</td></tr>';
 
     var stockList = stockMapToList(computeWarehouseStock(st, currentMaterialsSiteId));
     var stockRowsHtml = stockList.length ? stockList.map(function (r) {
@@ -3316,7 +3314,8 @@
         '<div><button type="button" class="submit-btn" id="btnPoSubmit" style="margin-top:14px">발주서 등록</button></div>' +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">발주서 목록</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>현장</th><th>업체</th><th>발주일</th><th>납기일</th><th>품목</th><th>상태</th><th></th></tr></thead><tbody>' + poRowsHtml + "</tbody></table></div>" +
+        '<div class="panel-caption" style="margin:0 0 10px">입고 확인은 창고장님이 처리하면 여기 상태가 자동으로 "입고완료"로 바뀌어요.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>업체</th><th>발주일</th><th>납기일</th><th>품목</th><th>상태</th></tr></thead><tbody>' + poRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">창고 재고 (선택한 현장)</h2>' +
         '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
@@ -3369,18 +3368,8 @@
       state.purchaseOrders.push({ id: uid(), siteId: site.id, siteName: site.name, vendor: vendor, orderDate: orderDate, expectedDate: expectedDate, status: "발주됨", items: items, createdAt: Date.now() });
       persist(function (ok) { if (ok) { showToast("발주서가 등록됐어요"); renderDashView(); } });
     });
-    Array.prototype.forEach.call(document.querySelectorAll("[data-po-receive]"), function (btn) {
-      btn.addEventListener("click", function () {
-        var id = btn.getAttribute("data-po-receive");
-        var po = (state.purchaseOrders || []).filter(function (p) { return p.id === id; })[0];
-        if (!po || po.status === "입고완료") return;
-        (po.items || []).forEach(function (it) {
-          state.materialTx.push({ id: uid(), siteId: po.siteId, type: "receive", name: it.name, spec: it.spec, qty: it.qty, unit: it.unit, poId: po.id, createdAt: Date.now() });
-        });
-        po.status = "입고완료";
-        persist(function (ok) { if (ok) { showToast("입고 처리됐어요"); renderDashView(); } });
-      });
-    });
+    // 입고 처리는 창고장님 화면에서만 진행해요 (data-wh-receive) — 여기서 처리하면 창고 재고에 반영이 안 되니
+    // 관리자는 발주서 목록에서 상태만 확인하고, 실제 입고 확인은 창고장님이 눌러요.
     Array.prototype.forEach.call(document.querySelectorAll("[data-req-topo]"), function (btn) {
       btn.addEventListener("click", function () {
         var id = btn.getAttribute("data-req-topo");
