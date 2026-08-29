@@ -780,8 +780,9 @@
     if (!state.settings[key] || !state.settings[key].length) state.settings[key] = SETTINGS_LIST_DEFAULTS[key].slice();
     return state.settings[key];
   }
-  var ROLE_OPTIONS = ["관리자", "계장공", "계장공(팀장)", "유도원"];
+  var ROLE_OPTIONS = ["관리자", "계장공", "계장공(팀장)", "유도원", "창고장"];
   var LEAD_ROLE = "계장공(팀장)"; // only this role can fill in "명일 작업내용" (next-day work plan)
+  var WAREHOUSE_ROLE = "창고장"; // site-scoped warehouse manager: receives POs into stock, distributes to teams, no team of their own
   var WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
   var NAV_ITEMS = [
@@ -1468,15 +1469,19 @@
       siteFieldsHtml =
         '<div class="field"><label>회사명</label><select id="authCompany">' + companyOpts + "</select></div>" +
         '<div class="field"><label>현장</label><select id="authSite"></select></div>' +
-        '<div class="field"><label>소속팀</label><select id="authTeam"></select></div>' +
-        '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>';
+        '<div id="authTeamFieldWrap">' +
+          '<div class="field"><label>소속팀</label><select id="authTeam"></select></div>' +
+          '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>' +
+        "</div>";
     } else {
       var teamOpts = st.teams.map(function (t) {
         return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
       }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
       siteFieldsHtml =
-        '<div class="field"><label>소속팀</label><select id="authTeam">' + teamOpts + "</select></div>" +
-        '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>';
+        '<div id="authTeamFieldWrap">' +
+          '<div class="field"><label>소속팀</label><select id="authTeam">' + teamOpts + "</select></div>" +
+          '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>' +
+        "</div>";
     }
 
     var formHtml = isSignup ?
@@ -3649,6 +3654,15 @@
         document.getElementById("authTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
       });
     }
+    var roleSel = document.getElementById("authRole");
+    var teamFieldWrap = document.getElementById("authTeamFieldWrap");
+    if (roleSel && teamFieldWrap) {
+      var refreshTeamFieldVisibility = function () {
+        teamFieldWrap.style.display = roleSel.value === WAREHOUSE_ROLE ? "none" : "";
+      };
+      roleSel.addEventListener("change", refreshTeamFieldVisibility);
+      refreshTeamFieldVisibility();
+    }
     var loginBtn = document.getElementById("btnAuthLogin");
     if (loginBtn) loginBtn.addEventListener("click", doLogin);
     var signupBtn = document.getElementById("btnAuthSignup");
@@ -3683,8 +3697,9 @@
     var phone = document.getElementById("authPhone").value.trim();
     var role = document.getElementById("authRole").value;
     var hasSites = (state.sites && state.sites.length) ? true : false;
+    var isWarehouse = role === WAREHOUSE_ROLE;
     var siteId = "", siteName = "";
-    var teamSel = document.getElementById("authTeam").value;
+    var teamSel = isWarehouse ? "" : document.getElementById("authTeam").value;
     var team = teamSel;
     if (!id) { authError = "아이디를 입력해주세요"; renderInputView(); return; }
     if (getAccount(state, id)) { authError = "이미 사용 중인 아이디예요"; renderInputView(); return; }
@@ -3699,7 +3714,7 @@
       if (!site) { authError = "현장을 선택해주세요"; renderInputView(); return; }
       siteName = site.name;
     }
-    if (teamSel === "__new__") {
+    if (!isWarehouse && teamSel === "__new__") {
       var nv = document.getElementById("authTeamNew").value.trim();
       if (!nv) { authError = "새 팀 이름을 입력해주세요"; renderInputView(); return; }
       team = nv;
@@ -3707,12 +3722,14 @@
     authBusy = true; authError = ""; renderInputView();
     hashPassword(id, pw).then(function (hash) {
       if (!state.accounts) state.accounts = {};
-      state.accounts[id] = { workerId: id, name: name, passwordHash: hash, phone: phone, role: role, team: team, siteId: siteId || null, site: siteName || "", createdAt: Date.now() };
-      if (siteId) {
-        var s = findSite(state, siteId);
-        if (s) { if (!s.teams) s.teams = []; if (s.teams.indexOf(team) < 0) s.teams.push(team); }
+      state.accounts[id] = { workerId: id, name: name, passwordHash: hash, phone: phone, role: role, team: isWarehouse ? "" : team, siteId: siteId || null, site: siteName || "", createdAt: Date.now() };
+      if (!isWarehouse) {
+        if (siteId) {
+          var s = findSite(state, siteId);
+          if (s) { if (!s.teams) s.teams = []; if (s.teams.indexOf(team) < 0) s.teams.push(team); }
+        }
+        if (state.teams.indexOf(team) < 0) state.teams.push(team);
       }
-      if (state.teams.indexOf(team) < 0) state.teams.push(team);
       persist(function (ok) {
         authBusy = false;
         if (!ok) { authError = "가입 저장에 실패했어요. 인터넷 연결을 확인해주세요"; renderInputView(); return; }
