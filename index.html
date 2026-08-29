@@ -736,7 +736,7 @@
   // 재고는 별도로 저장하지 않고, materialTx(입고/배부/사용 이벤트 로그)를 합산해서 그때그때 계산한다.
   if (!state.purchaseOrders) state.purchaseOrders = []; // {id, siteId, siteName, vendor, orderDate, expectedDate, status:"발주됨"|"입고완료", items:[{name,spec,qty,unit}], createdBy, createdAt}
   if (!state.materialTx) state.materialTx = []; // {id, siteId, type:"receive"|"distribute"|"use", name, spec, qty, team, poId, note, workerId, createdAt}
-  if (!state.materialRequests) state.materialRequests = []; // {id, siteId, team, name, spec, qty, note, status:"대기"|"충족"|"발주전환", requestedBy, createdAt, resolvedAt}
+  if (!state.materialRequests) state.materialRequests = []; // {id, siteId, team, name, spec, qty, note, status:"대기"|"충족"|"발주요청"|"발주완료", vendor, expectedDate, requestedBy, createdAt, orderRequestedAt, resolvedAt}
 
   var TEAM_COLORS = ["#E8630A", "#2E7D4F", "#3B6FB6", "#A8720A", "#8C4FBF", "#C4432B"];
   function teamColor(teams, name) {
@@ -2041,8 +2041,28 @@
         '<button type="button" class="account-bar-btn" data-wh-topo="' + r.id + '">발주 필요</button></td></tr>';
     }).join("") : '<tr><td colspan="6" class="empty-state">대기 중인 요청이 없어요</td></tr>';
 
+    // 발주가 필요하다고 표시한 요청들 (관리자가 실제 발주를 완료하기 전까지의 진행상황을 창고장도 볼 수 있게)
+    var orderReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === siteId && (r.status === "발주요청" || r.status === "발주완료"); })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var orderReqRowsHtml = orderReqs.length ? orderReqs.map(function (r) {
+      var statusHtml = r.status === "발주완료" ?
+        '<span class="settings-tag" style="color:var(--good)">발주완료' + (r.vendor ? " · " + escapeHtml(r.vendor) : "") + (r.expectedDate ? " · 납기 " + escapeHtml(r.expectedDate) : "") + "</span>" :
+        '<span class="settings-tag" style="color:var(--accent)">발주요청 (관리자 처리 대기)</span>';
+      return '<tr><td>' + escapeHtml(r.team || "") + "</td><td>" + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + " " + escapeHtml(r.unit || "") + "</td><td>" + statusHtml + "</td></tr>";
+    }).join("") : '<tr><td colspan="5" class="empty-state">발주 요청한 내역이 없어요</td></tr>';
+
+    // 팀별 배부 내역 (누구에게 얼마나 나눠줬는지 확인용)
+    var distTx = (st.materialTx || []).filter(function (tx) { return tx.siteId === siteId && tx.type === "distribute"; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var distRowsHtml = distTx.length ? distTx.map(function (tx) {
+      var d = tx.createdAt ? new Date(tx.createdAt) : null;
+      var dateStr = d ? (d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")) : "";
+      return '<tr><td>' + escapeHtml(tx.team || "") + "</td><td>" + escapeHtml(tx.name) + "</td><td>" + escapeHtml(tx.spec || "") + "</td><td>" + tx.qty + " " + escapeHtml(tx.unit || "") + "</td><td>" + dateStr + "</td></tr>";
+    }).join("") : '<tr><td colspan="5" class="empty-state">아직 배부한 내역이 없어요</td></tr>';
+
     return '<div class="panel-caption" style="margin:-4px 0 14px">📦 ' + escapeHtml(site ? site.name : "") + " 창고를 관리해요. 발주 입고 → 팀 배부 → 팀 요청 처리 순서로 진행해요.</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">입고 대기 발주</h2>' +
+        '<div class="panel-caption" style="margin:0 0 10px">관리자가 실제로 발주서를 등록한 건만 여기 나와요.</div>' +
         '<div class="table-wrap"><table><thead><tr><th>업체</th><th>납기일</th><th>품목</th><th></th></tr></thead><tbody>' + incomingHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">팀에 배부하기</h2>' +
@@ -2058,8 +2078,15 @@
       '<div class="panel"><h2 style="margin:0 0 10px">창고 재고</h2>' +
         '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
       "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">팀별 배부 내역</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>날짜</th></tr></thead><tbody>' + distRowsHtml + "</tbody></table></div>" +
+      "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">팀 요청</h2>' +
         '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">발주 요청 현황</h2>' +
+        '<div class="panel-caption" style="margin:0 0 10px">위에서 "발주 필요"로 표시한 요청들의 진행상황이에요.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>상태</th></tr></thead><tbody>' + orderReqRowsHtml + "</tbody></table></div>" +
       "</div>";
   }
 
@@ -2081,7 +2108,8 @@
     var reqRowsHtml = myReqs.length ? myReqs.map(function (r) {
       var statusHtml = r.status === "대기" ? '<span class="settings-tag">대기</span>' :
         r.status === "충족" ? '<span class="settings-tag" style="color:var(--good)">지급완료</span>' :
-        '<span class="settings-tag" style="color:var(--accent)">발주전환</span>';
+        r.status === "발주완료" ? '<span class="settings-tag" style="color:var(--good)">발주완료' + (r.vendor ? " · " + escapeHtml(r.vendor) : "") + (r.expectedDate ? " · 납기 " + escapeHtml(r.expectedDate) : "") + "</span>" :
+        '<span class="settings-tag" style="color:var(--accent)">발주요청 (관리자 처리 대기)</span>';
       return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + " " + escapeHtml(r.unit || "") + "</td><td>" + statusHtml + "</td></tr>";
     }).join("") : '<tr><td colspan="4" class="empty-state">요청 내역이 없어요</td></tr>';
 
@@ -3252,9 +3280,24 @@
         '<td>' + escapeHtml(r.spec || "") + "</td>" +
         '<td>' + r.qty + " " + escapeHtml(r.unit || "") + "</td>" +
         '<td>' + escapeHtml(r.note || "") + "</td>" +
-        '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-req-topo="' + r.id + '">발주로 전환</button></td>' +
+        '<td><button type="button" class="account-bar-btn" data-req-topo="' + r.id + '">발주 필요로 표시</button></td>' +
       "</tr>";
     }).join("") : '<tr><td colspan="6" class="empty-state">대기 중인 요청이 없어요</td></tr>';
+
+    // 발주가 필요하다고 표시된 요청들 (창고장 또는 관리자가 표시) — 실제 발주서는 아직 아니고, 여기서 업체·납기일을 정해 "발주완료" 처리해야 발주서 목록에 진짜로 올라간다.
+    var orderReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === currentMaterialsSiteId && r.status === "발주요청"; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var orderReqRowsHtml = orderReqs.length ? orderReqs.map(function (r) {
+      return '<tr>' +
+        '<td>' + escapeHtml(r.team || "") + "</td>" +
+        '<td>' + escapeHtml(r.name) + "</td>" +
+        '<td>' + escapeHtml(r.spec || "") + "</td>" +
+        '<td>' + r.qty + " " + escapeHtml(r.unit || "") + "</td>" +
+        '<td><input type="text" id="reqVendor_' + r.id + '" placeholder="업체명" style="width:110px"></td>' +
+        '<td><input type="date" id="reqExpected_' + r.id + '" style="width:130px"></td>' +
+        '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-req-complete="' + r.id + '">발주완료</button></td>' +
+      "</tr>";
+    }).join("") : '<tr><td colspan="7" class="empty-state">발주가 필요하다고 표시된 요청이 없어요</td></tr>';
 
     return '<div class="panel-caption" style="margin:-4px 0 14px">발주서 → 창고 입고 → 팀별 배부 → 사용/잔여관리 → 요청 순으로 돌아가는 자재 흐름을 여기서 관리해요.</div>' +
       '<div class="panel">' +
@@ -3280,6 +3323,10 @@
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">대기 중인 자재 요청</h2>' +
         '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+      "</div>" +
+      '<div class="panel"><h2 style="margin:0 0 10px">발주 요청</h2>' +
+        '<div class="panel-caption" style="margin:0 0 10px">창고장 또는 관리자가 "발주 필요"로 표시한 항목이에요. 업체명·납기일을 입력하고 발주완료를 누르면 실제 발주서로 등록돼요.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>업체명</th><th>납기일</th><th></th></tr></thead><tbody>' + orderReqRowsHtml + "</tbody></table></div>" +
       "</div>";
   }
   function collectPoItems() {
@@ -3339,11 +3386,34 @@
         var id = btn.getAttribute("data-req-topo");
         var req = (state.materialRequests || []).filter(function (r) { return r.id === id; })[0];
         if (!req) return;
+        // 실제 발주서는 아직 만들지 않는다 — 아래 "발주 요청"에서 업체·납기일을 정해 "발주완료" 처리해야 진짜 발주서가 된다.
+        req.status = "발주요청";
+        req.orderRequestedAt = Date.now();
+        persist(function (ok) { if (ok) { showToast("발주가 필요하다고 표시했어요"); renderDashView(); } });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-req-complete]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-req-complete");
+        var req = (state.materialRequests || []).filter(function (r) { return r.id === id; })[0];
+        if (!req) return;
+        var vendorInput = document.getElementById("reqVendor_" + id);
+        var expectedInput = document.getElementById("reqExpected_" + id);
+        var vendor = vendorInput ? vendorInput.value.trim() : "";
+        var expectedDate = expectedInput ? expectedInput.value : "";
+        if (!vendor) { showToast("업체명을 입력해주세요"); return; }
         var site = findSite(state, req.siteId);
-        state.purchaseOrders.push({ id: uid(), siteId: req.siteId, siteName: site ? site.name : "", vendor: "", orderDate: "", expectedDate: "", status: "발주됨", items: [{ name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "" }], createdAt: Date.now(), fromRequestId: req.id });
-        req.status = "발주전환";
+        state.purchaseOrders.push({
+          id: uid(), siteId: req.siteId, siteName: site ? site.name : "", vendor: vendor,
+          orderDate: todayStr(), expectedDate: expectedDate, status: "발주됨",
+          items: [{ name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "" }],
+          createdAt: Date.now(), fromRequestId: req.id
+        });
+        req.status = "발주완료";
+        req.vendor = vendor;
+        req.expectedDate = expectedDate;
         req.resolvedAt = Date.now();
-        persist(function (ok) { if (ok) { showToast("발주서로 전환됐어요"); renderDashView(); } });
+        persist(function (ok) { if (ok) { showToast("발주완료 처리했어요"); renderDashView(); } });
       });
     });
   }
@@ -3768,10 +3838,9 @@
         var id = btn.getAttribute("data-wh-topo");
         var req = (state.materialRequests || []).filter(function (r) { return r.id === id; })[0];
         if (!req) return;
-        var site = findSite(state, req.siteId);
-        state.purchaseOrders.push({ id: uid(), siteId: req.siteId, siteName: site ? site.name : "", vendor: "", orderDate: "", expectedDate: "", status: "발주됨", items: [{ name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "" }], createdAt: Date.now(), fromRequestId: req.id });
-        req.status = "발주전환";
-        req.resolvedAt = Date.now();
+        // 실제 발주서는 아직 만들지 않는다 — 관리자가 업체·납기일을 정해서 "발주완료" 처리해야 진짜 발주서가 된다.
+        req.status = "발주요청";
+        req.orderRequestedAt = Date.now();
         persist(function (ok) { if (ok) { showToast("발주가 필요하다고 표시했어요. 관리자가 발주를 진행할 거예요"); renderInputView(); } });
       });
     });
