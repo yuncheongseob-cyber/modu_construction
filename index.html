@@ -3233,14 +3233,157 @@
     });
   }
   // ---- 자재관리 (관리자 대시보드) ----
-  function buildPoItemRowHtml(idx) {
+  function buildPoItemRowHtml(idx, item) {
+    item = item || {};
     return '<div class="field-row po-item-row" data-po-item-idx="' + idx + '">' +
-      '<div class="field" style="margin:0"><label>품목</label><input type="text" data-po-role="name" placeholder="예: H형강"></div>' +
-      '<div class="field" style="margin:0"><label>규격</label><input type="text" data-po-role="spec" placeholder="예: 200x200"></div>' +
-      '<div class="field" style="margin:0;max-width:110px"><label>수량</label><input type="number" data-po-role="qty" placeholder="0" min="0"></div>' +
-      '<div class="field" style="margin:0;max-width:90px"><label>단위</label><input type="text" data-po-role="unit" placeholder="EA"></div>' +
+      '<div class="field" style="margin:0"><label>품목</label><input type="text" data-po-role="name" placeholder="예: H형강" value="' + escapeHtml(item.name || "") + '"></div>' +
+      '<div class="field" style="margin:0"><label>규격</label><input type="text" data-po-role="spec" placeholder="예: 200x200" value="' + escapeHtml(item.spec || "") + '"></div>' +
+      '<div class="field" style="margin:0;max-width:110px"><label>수량</label><input type="number" data-po-role="qty" placeholder="0" min="0" value="' + (item.qty || "") + '"></div>' +
+      '<div class="field" style="margin:0;max-width:90px"><label>단위</label><input type="text" data-po-role="unit" placeholder="EA" value="' + escapeHtml(item.unit || "") + '"></div>' +
       (idx > 0 ? '<button type="button" class="settings-tag-remove" style="margin-top:22px" data-po-item-remove="1">✕</button>' : "") +
     "</div>";
+  }
+  function rebuildPoItemBlocks(items) {
+    var container = document.getElementById("poItemBlocks");
+    if (!container || !items || !items.length) return;
+    container.innerHTML = items.map(function (it, idx) { return buildPoItemRowHtml(idx, it); }).join("");
+  }
+  // 엑셀에서 복사한 셀(탭 구분) 또는 PDF에서 뽑아낸 표 형태 텍스트(공백 2칸 이상 구분)를 자재 품목 목록으로 해석한다.
+  // 헤더 행(품명/규격/수량 등)이 있으면 그 열 순서를 따르고, 없으면 품명·규격·수량·단위 순서로 가정한다.
+  function parseItemsFromRawText(text) {
+    if (!text) return null;
+    var lines = text.replace(/ /g, " ").split(/\r?\n/);
+    var headerIdx = -1, colIndex = null;
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i];
+      if (/품[명목]/.test(t) && /규격/.test(t) && /수량/.test(t)) {
+        var headerTokens = t.trim().split(/\t|\s{2,}/).map(function (s) { return s.trim(); }).filter(Boolean);
+        var ci = {};
+        headerTokens.forEach(function (tok, idx) {
+          if (/품[명목]/.test(tok)) ci.name = idx;
+          else if (/규격/.test(tok)) ci.spec = idx;
+          else if (/수량/.test(tok)) ci.qty = idx;
+          else if (/단위/.test(tok)) ci.unit = idx;
+        });
+        if (ci.name != null && ci.qty != null) { headerIdx = i; colIndex = ci; break; }
+      }
+    }
+    var startLine = headerIdx >= 0 ? headerIdx + 1 : 0;
+    if (!colIndex) colIndex = { name: 0, spec: 1, qty: 2, unit: 3 };
+    var items = [];
+    for (var j = startLine; j < lines.length; j++) {
+      var line = lines[j];
+      var trimmed = line.trim();
+      if (!trimmed) continue;
+      if (/이상\s*발주|NEGO|최종\s*발주\s*금액|^TOTAL|^합\s*계/i.test(trimmed)) break;
+      var tokens = trimmed.split(/\t|\s{2,}/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (tokens.length < 2) continue;
+      var name = tokens[colIndex.name] || "";
+      var spec = colIndex.spec != null ? (tokens[colIndex.spec] || "") : "";
+      var qtyRaw = tokens[colIndex.qty] || "";
+      var unit = colIndex.unit != null ? (tokens[colIndex.unit] || "") : "";
+      var qty = parseFloat(String(qtyRaw).replace(/,/g, "")) || 0;
+      // 열 인덱스로 못 찾았으면(줄마다 칸 수가 다를 때) 숫자 토큰을 직접 찾아서 보정한다.
+      if (!qty) {
+        for (var k = 0; k < tokens.length; k++) {
+          if (/^[\d,]+(\.\d+)?$/.test(tokens[k]) && parseFloat(tokens[k].replace(/,/g, "")) > 0) {
+            qty = parseFloat(tokens[k].replace(/,/g, ""));
+            if (!name) name = tokens.slice(0, k).join(" ");
+            if (!unit && tokens[k + 1] && !/^[\d,]+(\.\d+)?$/.test(tokens[k + 1])) unit = tokens[k + 1];
+            break;
+          }
+        }
+      }
+      if (name && qty > 0) items.push({ name: name, spec: spec, qty: qty, unit: unit });
+    }
+    return items.length ? items : null;
+  }
+  // PDF/엑셀 원문에서 업체명·발주일·납기일을 최대한 뽑아본다 (못 찾으면 그냥 비워둔다 — 관리자가 확인 후 채우면 된다).
+  function parsePoMetaFromRawText(text) {
+    var meta = {};
+    var vendorMatch = text.match(/업체명\s*[:：]\s*(\S.*)/);
+    if (vendorMatch) meta.vendor = vendorMatch[1].trim().split(/\s{2,}/)[0];
+    var orderMatch = text.match(/주문\s*일자\s*[:：]?\s*(\d{4}[.\-\s]\s*\d{1,2}[.\-\s]\s*\d{1,2})/) || text.match(/발주\s*일\s*[:：]?\s*(\d{4}[.\-\s]\s*\d{1,2}[.\-\s]\s*\d{1,2})/);
+    if (orderMatch) meta.orderDate = normalizeDateStr(orderMatch[1]);
+    var expectMatch = text.match(/납기일\s*[:：]?\s*(\d{4}[.\-\s]\s*\d{1,2}[.\-\s]\s*\d{1,2})/);
+    if (expectMatch) meta.expectedDate = normalizeDateStr(expectMatch[1]);
+    return meta;
+  }
+  function normalizeDateStr(s) {
+    var m = s.match(/(\d{4})[.\-\s]+(\d{1,2})[.\-\s]+(\d{1,2})/);
+    if (!m) return "";
+    return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+  }
+  function applyParsedPoResult(items, meta) {
+    if (items && items.length) rebuildPoItemBlocks(items);
+    if (meta) {
+      var vendorEl = document.getElementById("poVendor");
+      if (vendorEl && !vendorEl.value && meta.vendor) vendorEl.value = meta.vendor;
+      var orderEl = document.getElementById("poOrderDate");
+      if (orderEl && !orderEl.value && meta.orderDate) orderEl.value = meta.orderDate;
+      var expectedEl = document.getElementById("poExpectedDate");
+      if (expectedEl && !expectedEl.value && meta.expectedDate) expectedEl.value = meta.expectedDate;
+    }
+    if (items && items.length) showToast("품목 " + items.length + "개를 인식했어요. 내용을 확인한 뒤 등록해주세요");
+    else showToast("자재 목록을 인식하지 못했어요. 품명/규격/수량 형식을 확인해주세요");
+  }
+  // ---- PDF.js 지연 로딩 (발주서 PDF 업로드 시에만) ----
+  var pdfjsLoaded = false, pdfjsFailed = false, pdfjsLoading = false, pdfjsReadyCallbacks = [];
+  function ensurePdfjs(cb) {
+    if (pdfjsLoaded || pdfjsFailed) { cb(pdfjsLoaded); return; }
+    pdfjsReadyCallbacks.push(cb);
+    if (pdfjsLoading) return;
+    pdfjsLoading = true;
+    loadScriptSeq(["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"], function (ok) {
+      pdfjsLoading = false;
+      if (ok && window.pdfjsLib) {
+        try {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          pdfjsLoaded = true;
+        } catch (e) { pdfjsFailed = true; }
+      } else { pdfjsFailed = true; }
+      var cbs = pdfjsReadyCallbacks; pdfjsReadyCallbacks = [];
+      cbs.forEach(function (f) { f(pdfjsLoaded); });
+    });
+  }
+  // PDF의 각 페이지 텍스트를 좌표 기준으로 줄 단위로 묶어서, pdftotext -layout 과 비슷한 "표처럼 정렬된" 텍스트로 재구성한다.
+  function extractPdfLayoutText(arrayBuffer, done) {
+    pdfjsLib.getDocument({ data: arrayBuffer }).promise.then(function (pdf) {
+      var pageTexts = [];
+      var pageNum = 1;
+      function nextPage() {
+        if (pageNum > pdf.numPages) { done(pageTexts.join("\n")); return; }
+        pdf.getPage(pageNum).then(function (page) {
+          return page.getTextContent();
+        }).then(function (content) {
+          var rows = {};
+          content.items.forEach(function (it) {
+            if (!it.str || !it.str.trim()) return;
+            var y = Math.round(it.transform[5] / 3) * 3; // 좌표 오차 흡수용으로 3px 단위로 반올림
+            if (!rows[y]) rows[y] = [];
+            rows[y].push({ x: it.transform[4], str: it.str });
+          });
+          var ys = Object.keys(rows).map(Number).sort(function (a, b) { return b - a; }); // 위에서 아래로
+          var lines = ys.map(function (y) {
+            var runs = rows[y].sort(function (a, b) { return a.x - b.x; });
+            var line = "", lastEnd = null;
+            runs.forEach(function (r) {
+              if (lastEnd != null) {
+                var gap = r.x - lastEnd;
+                line += gap > 8 ? "  " : "";
+              }
+              line += r.str;
+              lastEnd = r.x + r.str.length * 5; // 대략적인 글자폭 추정
+            });
+            return line;
+          });
+          pageTexts.push(lines.join("\n"));
+          pageNum++;
+          nextPage();
+        }).catch(function () { pageNum++; nextPage(); });
+      }
+      nextPage();
+    }).catch(function () { done(""); });
   }
   function buildMaterialsPageHtml(st) {
     var sites = st.sites || [];
@@ -3308,7 +3451,16 @@
           '<div class="field"><label>발주일</label><input type="date" id="poOrderDate"></div>' +
           '<div class="field"><label>납기일</label><input type="date" id="poExpectedDate"></div>' +
         "</div>" +
-        '<div class="section-title" style="margin:10px 0 8px">품목</div>' +
+        '<div class="section-title" style="margin:14px 0 8px">품목 빠르게 채우기</div>' +
+        '<div class="panel-caption" style="margin:0 0 8px">엑셀에서 품명·규격·수량·단위 셀을 드래그해서 복사(Ctrl+C)한 다음, 아래에 붙여넣기(Ctrl+V) 하면 자재를 한 번에 채울 수 있어요. 엑셀·PDF 발주서 파일을 그대로 올려도 자동으로 읽어와요.</div>' +
+        '<textarea id="poPasteArea" rows="3" placeholder="여기에 엑셀에서 복사한 내용을 붙여넣으세요 (품명  규격  수량  단위)" style="width:100%;font-family:inherit;font-size:13.5px;padding:8px;border-radius:8px;border:1px solid var(--border);box-sizing:border-box"></textarea>' +
+        '<div class="field-row" style="margin-top:8px;align-items:center">' +
+          '<button type="button" class="submit-btn" id="btnPoParsePaste" style="margin:0;padding:0 14px;height:36px">붙여넣은 내용 적용</button>' +
+          '<label class="account-bar-btn" for="poFileInput" style="margin:0;cursor:pointer">📎 발주서 파일 업로드 (엑셀·PDF)</label>' +
+          '<input type="file" id="poFileInput" accept=".xlsx,.xls,.csv,.pdf" style="display:none">' +
+          '<span id="poFileStatus" style="font-size:12.5px;color:var(--text-faint)"></span>' +
+        "</div>" +
+        '<div class="section-title" style="margin:16px 0 8px">품목</div>' +
         '<div id="poItemBlocks">' + buildPoItemRowHtml(0) + "</div>" +
         '<button type="button" class="account-bar-btn" id="btnPoAddItem" style="margin-top:8px">+ 품목 추가</button>' +
         '<div><button type="button" class="submit-btn" id="btnPoSubmit" style="margin-top:14px">발주서 등록</button></div>' +
@@ -3353,6 +3505,62 @@
       if (ev.target && ev.target.getAttribute("data-po-item-remove")) {
         var row = ev.target.closest(".po-item-row");
         if (row) row.parentNode.removeChild(row);
+      }
+    });
+    var parsePasteBtn = document.getElementById("btnPoParsePaste");
+    if (parsePasteBtn) parsePasteBtn.addEventListener("click", function () {
+      var raw = document.getElementById("poPasteArea").value;
+      var items = parseItemsFromRawText(raw);
+      var meta = parsePoMetaFromRawText(raw);
+      applyParsedPoResult(items, meta);
+    });
+    var poFileInput = document.getElementById("poFileInput");
+    if (poFileInput) poFileInput.addEventListener("change", function () {
+      var file = this.files && this.files[0];
+      this.value = ""; // 같은 파일을 다시 골라도 change가 다시 뜨도록 초기화
+      if (!file) return;
+      var statusEl = document.getElementById("poFileStatus");
+      var name = file.name.toLowerCase();
+      if (statusEl) statusEl.textContent = "읽는 중…";
+      if (/\.pdf$/.test(name)) {
+        ensurePdfjs(function (ok) {
+          if (!ok) { if (statusEl) statusEl.textContent = ""; showToast("PDF 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해주세요"); return; }
+          var reader = new FileReader();
+          reader.onload = function () {
+            extractPdfLayoutText(reader.result, function (text) {
+              if (statusEl) statusEl.textContent = "";
+              var items = parseItemsFromRawText(text);
+              var meta = parsePoMetaFromRawText(text);
+              applyParsedPoResult(items, meta);
+            });
+          };
+          reader.onerror = function () { if (statusEl) statusEl.textContent = ""; showToast("파일을 읽지 못했어요"); };
+          reader.readAsArrayBuffer(file);
+        });
+      } else if (/\.xlsx$|\.xls$|\.csv$/.test(name)) {
+        ensureXlsx(function (ok) {
+          if (!ok) { if (statusEl) statusEl.textContent = ""; showToast("엑셀 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해주세요"); return; }
+          var reader = new FileReader();
+          reader.onload = function () {
+            if (statusEl) statusEl.textContent = "";
+            try {
+              var wb = XLSX.read(reader.result, { type: "array" });
+              var items = null, meta = {};
+              for (var si = 0; si < wb.SheetNames.length && !items; si++) {
+                var ws = wb.Sheets[wb.SheetNames[si]];
+                var text = XLSX.utils.sheet_to_csv(ws, { FS: "\t" });
+                var foundItems = parseItemsFromRawText(text);
+                if (foundItems) { items = foundItems; meta = parsePoMetaFromRawText(text); }
+              }
+              applyParsedPoResult(items, meta);
+            } catch (e) { showToast("파일을 해석하지 못했어요. 형식을 확인해주세요"); }
+          };
+          reader.onerror = function () { if (statusEl) statusEl.textContent = ""; showToast("파일을 읽지 못했어요"); };
+          reader.readAsArrayBuffer(file);
+        });
+      } else {
+        if (statusEl) statusEl.textContent = "";
+        showToast("엑셀(.xlsx/.xls/.csv) 또는 PDF 파일만 올릴 수 있어요");
       }
     });
     var poSubmitBtn = document.getElementById("btnPoSubmit");
