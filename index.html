@@ -280,15 +280,23 @@
   .po-item-table input:focus { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
   .po-item-table input[type="number"] { font-family: "IBM Plex Mono", monospace; }
 
-  .po-items-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .po-items-list li {
-    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
-    padding: 3px 0; border-bottom: 1px dashed var(--border);
+  .po-items-table { border-collapse: collapse; width: 100%; min-width: 340px; }
+  .po-items-table th {
+    text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-faint);
+    text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px 4px; border-bottom: 1px solid var(--border);
   }
-  .po-items-list li:last-child { border-bottom: none; }
-  .po-item-name { font-weight: 600; }
-  .po-item-spec { color: var(--text-faint); font-size: 12px; }
-  .po-item-qty { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--accent); white-space: nowrap; }
+  .po-items-table td {
+    padding: 4px 8px; border-bottom: 1px dashed var(--border); font-size: 13px; vertical-align: middle;
+  }
+  .po-items-table tr:last-child td { border-bottom: none; }
+  .po-items-table .po-item-name { font-weight: 600; }
+  .po-items-table .po-item-spec { color: var(--text-faint); font-size: 12px; }
+  .po-items-table .po-item-qty { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--accent); white-space: nowrap; }
+  .po-item-note-input {
+    width: 100%; box-sizing: border-box; border: 1px solid transparent; background: var(--surface-2); color: var(--text);
+    font-family: inherit; font-size: 12.5px; padding: 5px 7px; border-radius: 6px; outline: none;
+  }
+  .po-item-note-input:focus { background: var(--surface); border-color: var(--accent); }
   .po-items-empty { color: var(--text-faint); }
 
   .date-filter-wrap { position: relative; }
@@ -841,14 +849,25 @@
   function stockMapToList(map) {
     return Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
   }
-  // 발주서의 품목 목록을 한 줄로 뭉치지 않고, 품목별로 줄을 나눠서 보여준다.
-  function poItemsListHtml(items) {
+  // 발주서의 품목 목록을 한 줄로 뭉치지 않고, 품목/규격/수량/단위/비고를 칸으로 나눠서 보여준다.
+  // opts.editable === true 이면 비고 칸을 직접 입력할 수 있는 입력창으로 렌더링한다 (opts.poId 필요).
+  function poItemsListHtml(items, opts) {
+    opts = opts || {};
     if (!items || !items.length) return '<span class="po-items-empty">—</span>';
-    return '<ul class="po-items-list">' + items.map(function (it) {
-      return '<li><span class="po-item-name">' + escapeHtml(it.name) + "</span>" +
-        (it.spec ? '<span class="po-item-spec">' + escapeHtml(it.spec) + "</span>" : "") +
-        '<span class="po-item-qty">' + it.qty + escapeHtml(it.unit || "") + "</span></li>";
-    }).join("") + "</ul>";
+    var editable = !!opts.editable && opts.poId;
+    var rowsHtml = items.map(function (it, idx) {
+      var noteCell = editable
+        ? '<td><input type="text" class="po-item-note-input" data-po-note-poid="' + escapeHtml(opts.poId) + '" data-po-note-idx="' + idx + '" placeholder="비고" value="' + escapeHtml(it.note || "") + '"></td>'
+        : '<td>' + escapeHtml(it.note || "") + "</td>";
+      return '<tr>' +
+        '<td class="po-item-name">' + escapeHtml(it.name) + "</td>" +
+        '<td class="po-item-spec">' + escapeHtml(it.spec || "") + "</td>" +
+        '<td class="po-item-qty">' + it.qty + "</td>" +
+        '<td>' + escapeHtml(it.unit || "") + "</td>" +
+        noteCell +
+      "</tr>";
+    }).join("");
+    return '<table class="po-items-table"><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>비고</th></tr></thead><tbody>' + rowsHtml + "</tbody></table>";
   }
   function getDefectTypeOptions(st) { return (st.settings && st.settings.defectTypes && st.settings.defectTypes.length) ? st.settings.defectTypes : DEFAULT_DEFECT_TYPES; }
   function ensureSettingsList(key) {
@@ -3272,7 +3291,7 @@
     });
   }
   // ---- 자재관리 (관리자 대시보드) ----
-  var PO_ITEM_COL_ORDER = ["name", "spec", "qty", "unit"];
+  var PO_ITEM_COL_ORDER = ["name", "spec", "qty", "unit", "note"];
   function buildPoItemRowHtml(idx, item) {
     item = item || {};
     return '<tr class="po-item-row" data-po-item-idx="' + idx + '">' +
@@ -3280,6 +3299,7 @@
       '<td><input type="text" data-po-role="spec" placeholder="예: 200x200" value="' + escapeHtml(item.spec || "") + '"></td>' +
       '<td><input type="number" data-po-role="qty" placeholder="0" min="0" value="' + (item.qty || "") + '"></td>' +
       '<td><input type="text" data-po-role="unit" placeholder="EA" value="' + escapeHtml(item.unit || "") + '"></td>' +
+      '<td><input type="text" data-po-role="note" placeholder="비고" value="' + escapeHtml(item.note || "") + '"></td>' +
       '<td class="po-item-remove-cell">' + (idx > 0 ? '<button type="button" class="settings-tag-remove" data-po-item-remove="1">✕</button>' : "") + "</td>" +
     "</tr>";
   }
@@ -3441,7 +3461,7 @@
         '<td>' + escapeHtml(po.vendor || "") + "</td>" +
         '<td>' + escapeHtml(po.orderDate || "") + "</td>" +
         '<td>' + escapeHtml(po.expectedDate || "") + "</td>" +
-        '<td>' + poItemsListHtml(po.items) + "</td>" +
+        '<td>' + poItemsListHtml(po.items, { editable: true, poId: po.id }) + "</td>" +
         '<td>' + statusBadge + "</td>" +
       "</tr>";
     }).join("") : '<tr><td colspan="5" class="empty-state">아직 등록된 발주서가 없어요</td></tr>';
@@ -3492,7 +3512,7 @@
         "</div>" +
         '<div class="section-title" style="margin:16px 0 6px">품목</div>' +
         '<div class="panel-caption" style="margin:0 0 8px">엑셀에서 품명·규격·수량·단위 칸을 드래그해서 복사(Ctrl+C)한 다음, 아래 표의 아무 칸이나 클릭하고 붙여넣기(Ctrl+V) 하면 칸 그대로 채워져요. 필요하면 줄이 자동으로 늘어나요. 엑셀·PDF 발주서 파일을 그대로 올려도 자동으로 읽어와요.</div>' +
-        '<div class="table-wrap"><table class="po-item-table"><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th></th></tr></thead>' +
+        '<div class="table-wrap"><table class="po-item-table"><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>비고</th><th></th></tr></thead>' +
           '<tbody id="poItemBlocks">' + buildPoItemRowHtml(0) + "</tbody></table></div>" +
         '<div class="field-row" style="margin-top:10px;align-items:center">' +
           '<button type="button" class="account-bar-btn" id="btnPoAddItem" style="margin:0">+ 품목 추가</button>' +
@@ -3524,7 +3544,9 @@
       var spec = (row.querySelector('[data-po-role="spec"]').value || "").trim();
       var qty = parseFloat(row.querySelector('[data-po-role="qty"]').value) || 0;
       var unit = (row.querySelector('[data-po-role="unit"]').value || "").trim();
-      if (name && qty > 0) items.push({ name: name, spec: spec, qty: qty, unit: unit });
+      var noteEl = row.querySelector('[data-po-role="note"]');
+      var note = noteEl ? (noteEl.value || "").trim() : "";
+      if (name && qty > 0) items.push({ name: name, spec: spec, qty: qty, unit: unit, note: note });
     });
     return items;
   }
@@ -3641,6 +3663,17 @@
       state.purchaseOrders.push({ id: uid(), siteId: site.id, siteName: site.name, vendor: vendor, orderDate: orderDate, expectedDate: expectedDate, status: "발주됨", items: items, createdAt: Date.now() });
       persist(function (ok) { if (ok) { showToast("발주서가 등록됐어요"); renderDashView(); } });
     });
+    // 발주서 목록의 품목별 비고는 직접 입력해서 바로 저장할 수 있다.
+    Array.prototype.forEach.call(document.querySelectorAll(".po-item-note-input"), function (input) {
+      input.addEventListener("change", function () {
+        var poId = input.getAttribute("data-po-note-poid");
+        var idx = parseInt(input.getAttribute("data-po-note-idx"), 10);
+        var po = (state.purchaseOrders || []).filter(function (p) { return p.id === poId; })[0];
+        if (!po || !po.items || !po.items[idx]) return;
+        po.items[idx].note = input.value.trim();
+        persist(function (ok) { if (ok) showToast("비고를 저장했어요"); });
+      });
+    });
     // 입고 처리는 창고장님 화면에서만 진행해요 (data-wh-receive) — 여기서 처리하면 창고 재고에 반영이 안 되니
     // 관리자는 발주서 목록에서 상태만 확인하고, 실제 입고 확인은 창고장님이 눌러요.
     Array.prototype.forEach.call(document.querySelectorAll("[data-req-topo]"), function (btn) {
@@ -3668,7 +3701,7 @@
         state.purchaseOrders.push({
           id: uid(), siteId: req.siteId, siteName: site ? site.name : "", vendor: vendor,
           orderDate: todayStr(), expectedDate: expectedDate, status: "발주됨",
-          items: [{ name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "" }],
+          items: [{ name: req.name, spec: req.spec, qty: req.qty, unit: req.unit || "", note: req.note || "" }],
           createdAt: Date.now(), fromRequestId: req.id
         });
         req.status = "발주완료";
