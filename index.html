@@ -373,6 +373,9 @@
   .panel h2 { font-size: 16.5px; font-weight: 600; margin: 0 0 14px; }
   .panel h2 .count { color: var(--text-muted); font-weight: 500; font-size: 13px; }
   .panel .panel-caption { font-size: 11.5px; color: var(--text-faint); margin: -8px 0 14px; }
+  /* 관리자 대시보드 콘텐츠는 Stripe 대시보드처럼 그림자 대신 얇은 테두리 위주로, 조금 더 밀도 있게 보여준다. */
+  .dash-content .panel, .dash-content .kpi-tile { border-radius: 8px; box-shadow: none; }
+  .dash-content .kpi-tile .value { font-size: 23px; }
 
   .dash-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; align-items: start; }
 
@@ -404,19 +407,22 @@
   .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13.5px; }
 
   .dash-shell { display: flex; align-items: flex-start; gap: 20px; }
+  /* 관리자 대시보드 사이드바는 Stripe 대시보드처럼 항상 짙은 네이비로, 화이트 테마인 작업자 화면과 구분되게 둔다 (라이트/다크 모드와 무관). */
   .dash-sidebar {
-    width: 186px; flex: none; display: flex; flex-direction: column; gap: 2px;
-    position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 8px;
+    width: 186px; flex: none; display: flex; flex-direction: column; gap: 1px;
+    position: sticky; top: 16px; background: #0A2540; border: 1px solid #0A2540;
+    border-radius: var(--radius); padding: 10px 8px;
   }
   .dash-sidebar button {
     display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: none; background: transparent;
-    border-radius: 8px; font-size: 13.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+    border-radius: 8px; font-size: 13.5px; font-weight: 500; color: #8898AA; cursor: pointer;
     text-align: left; width: 100%;
   }
-  .dash-sidebar button:hover { background: var(--surface-2); color: var(--text); }
-  .dash-sidebar button.active { background: var(--accent-soft); color: var(--accent); }
+  .dash-sidebar button:hover { background: rgba(255,255,255,0.06); color: #E3E8EE; }
+  .dash-sidebar button.active { background: rgba(99,91,255,0.22); color: #FFFFFF; }
   .dash-sidebar .nav-icon { width: 18px; text-align: center; flex: none; font-size: 14px; }
+  .dash-sidebar .dash-lock-btn { border-top-color: rgba(255,255,255,0.12) !important; color: #6B7A90 !important; }
+  .dash-sidebar .dash-lock-btn:hover { background: rgba(255,255,255,0.06); color: #E3E8EE !important; }
   .dash-content { flex: 1; min-width: 0; }
 
   .stat-table-wrap { overflow-x: auto; }
@@ -2085,8 +2091,8 @@
       return '<option value="' + materialKey(r.name, r.spec) + '" data-max="' + r.qty + '" data-unit="' + escapeHtml(r.unit) + '">' + escapeHtml(r.name) + (r.spec ? " (" + escapeHtml(r.spec) + ")" : "") + " — 재고 " + r.qty + escapeHtml(r.unit) + "</option>";
     }).join("");
     var stockRowsHtml = stockList.length ? stockList.map(function (r) {
-      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + " " + escapeHtml(r.unit) + "</td></tr>";
-    }).join("") : '<tr><td colspan="3" class="empty-state">재고가 없어요</td></tr>';
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + "</td><td>" + escapeHtml(r.unit) + "</td></tr>";
+    }).join("") : '<tr><td colspan="4" class="empty-state">재고가 없어요</td></tr>';
 
     var teams = (site && site.teams) || [];
     var teamOptsHtml = teams.map(function (t) { return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>"; }).join("");
@@ -2094,10 +2100,10 @@
     var pendingReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === siteId && r.status === "대기"; })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     var reqRowsHtml = pendingReqs.length ? pendingReqs.map(function (r) {
-      return '<tr><td>' + escapeHtml(r.team || "") + "</td><td>" + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + " " + escapeHtml(r.unit || "") + "</td><td>" + escapeHtml(r.note || "") + "</td>" +
+      return '<tr><td>' + escapeHtml(r.team || "") + "</td><td>" + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + "</td><td>" + escapeHtml(r.unit || "") + "</td><td>" + escapeHtml(r.note || "") + "</td>" +
         '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-wh-fulfill="' + r.id + '">재고로 지급</button> ' +
         '<button type="button" class="account-bar-btn" data-wh-topo="' + r.id + '">발주 필요</button></td></tr>';
-    }).join("") : '<tr><td colspan="6" class="empty-state">대기 중인 요청이 없어요</td></tr>';
+    }).join("") : '<tr><td colspan="7" class="empty-state">대기 중인 요청이 없어요</td></tr>';
 
     // 발주가 필요하다고 표시한 요청들 (관리자가 실제 발주를 완료하기 전까지의 진행상황을 창고장도 볼 수 있게)
     var orderReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === siteId && (r.status === "발주요청" || r.status === "발주완료"); })
@@ -2106,8 +2112,8 @@
       var statusHtml = r.status === "발주완료" ?
         '<span class="settings-tag" style="color:var(--good)">발주완료' + (r.vendor ? " · " + escapeHtml(r.vendor) : "") + (r.expectedDate ? " · 납기 " + escapeHtml(r.expectedDate) : "") + "</span>" :
         '<span class="settings-tag" style="color:var(--accent)">발주요청 (관리자 처리 대기)</span>';
-      return '<tr><td>' + escapeHtml(r.team || "") + "</td><td>" + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + " " + escapeHtml(r.unit || "") + "</td><td>" + statusHtml + "</td></tr>";
-    }).join("") : '<tr><td colspan="5" class="empty-state">발주 요청한 내역이 없어요</td></tr>';
+      return '<tr><td>' + escapeHtml(r.team || "") + "</td><td>" + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + "</td><td>" + escapeHtml(r.unit || "") + "</td><td>" + statusHtml + "</td></tr>";
+    }).join("") : '<tr><td colspan="6" class="empty-state">발주 요청한 내역이 없어요</td></tr>';
 
     // 팀별 배부 내역 (누구에게 얼마나 나눠줬는지 확인용)
     var distTx = (st.materialTx || []).filter(function (tx) { return tx.siteId === siteId && tx.type === "distribute"; })
@@ -2115,8 +2121,8 @@
     var distRowsHtml = distTx.length ? distTx.map(function (tx) {
       var d = tx.createdAt ? new Date(tx.createdAt) : null;
       var dateStr = d ? (d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")) : "";
-      return '<tr><td>' + escapeHtml(tx.team || "") + "</td><td>" + escapeHtml(tx.name) + "</td><td>" + escapeHtml(tx.spec || "") + "</td><td>" + tx.qty + " " + escapeHtml(tx.unit || "") + "</td><td>" + dateStr + "</td></tr>";
-    }).join("") : '<tr><td colspan="5" class="empty-state">아직 배부한 내역이 없어요</td></tr>';
+      return '<tr><td>' + escapeHtml(tx.team || "") + "</td><td>" + escapeHtml(tx.name) + "</td><td>" + escapeHtml(tx.spec || "") + "</td><td>" + tx.qty + "</td><td>" + escapeHtml(tx.unit || "") + "</td><td>" + dateStr + "</td></tr>";
+    }).join("") : '<tr><td colspan="6" class="empty-state">아직 배부한 내역이 없어요</td></tr>';
 
     return '<div class="panel-caption" style="margin:-4px 0 14px">📦 ' + escapeHtml(site ? site.name : "") + " 창고를 관리해요. 발주 입고 → 팀 배부 → 팀 요청 처리 순서로 진행해요.</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">입고 대기 발주</h2>' +
@@ -2134,17 +2140,17 @@
         ) : '<div class="empty-state">배부할 재고가 없어요. 먼저 발주를 입고 처리해주세요.</div>') +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">창고 재고</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>단위</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">팀별 배부 내역</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>날짜</th></tr></thead><tbody>' + distRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>날짜</th></tr></thead><tbody>' + distRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">팀 요청</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">발주 요청 현황</h2>' +
         '<div class="panel-caption" style="margin:0 0 10px">위에서 "발주 필요"로 표시한 요청들의 진행상황이에요.</div>' +
-        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>상태</th></tr></thead><tbody>' + orderReqRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>상태</th></tr></thead><tbody>' + orderReqRowsHtml + "</tbody></table></div>" +
       "</div>";
   }
 
@@ -2158,8 +2164,8 @@
       return '<option value="' + materialKey(r.name, r.spec) + '" data-max="' + r.qty + '" data-unit="' + escapeHtml(r.unit) + '">' + escapeHtml(r.name) + (r.spec ? " (" + escapeHtml(r.spec) + ")" : "") + " — 보유 " + r.qty + escapeHtml(r.unit) + "</option>";
     }).join("");
     var stockRowsHtml = stockList.length ? stockList.map(function (r) {
-      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + " " + escapeHtml(r.unit) + "</td></tr>";
-    }).join("") : '<tr><td colspan="3" class="empty-state">보유 중인 자재가 없어요</td></tr>';
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + "</td><td>" + escapeHtml(r.unit) + "</td></tr>";
+    }).join("") : '<tr><td colspan="4" class="empty-state">보유 중인 자재가 없어요</td></tr>';
 
     var myReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === siteId && r.team === team; })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
@@ -2168,12 +2174,12 @@
         r.status === "충족" ? '<span class="settings-tag" style="color:var(--good)">지급완료</span>' :
         r.status === "발주완료" ? '<span class="settings-tag" style="color:var(--good)">발주완료' + (r.vendor ? " · " + escapeHtml(r.vendor) : "") + (r.expectedDate ? " · 납기 " + escapeHtml(r.expectedDate) : "") + "</span>" :
         '<span class="settings-tag" style="color:var(--accent)">발주요청 (관리자 처리 대기)</span>';
-      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + " " + escapeHtml(r.unit || "") + "</td><td>" + statusHtml + "</td></tr>";
-    }).join("") : '<tr><td colspan="4" class="empty-state">요청 내역이 없어요</td></tr>';
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec || "") + "</td><td>" + r.qty + "</td><td>" + escapeHtml(r.unit || "") + "</td><td>" + statusHtml + "</td></tr>";
+    }).join("") : '<tr><td colspan="5" class="empty-state">요청 내역이 없어요</td></tr>';
 
     return '<div class="panel-caption" style="margin:-4px 0 14px">📦 우리 팀(' + escapeHtml(team) + ") 보유 자재를 확인하고, 사용 기록·부족분 요청을 여기서 해요.</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">우리 팀 보유 재고</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>단위</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">오늘 사용 기록</h2>' +
         (stockOptsHtml ? (
@@ -2191,7 +2197,7 @@
         "</div>" +
         '<div class="field"><label>메모</label><input type="text" id="leadReqNote" placeholder="선택 입력"></div>' +
         '<button type="button" class="submit-btn" id="btnLeadReq">요청 보내기</button>' +
-        '<div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>상태</th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>상태</th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
       "</div>";
   }
 
@@ -3468,8 +3474,8 @@
 
     var stockList = stockMapToList(computeWarehouseStock(st, currentMaterialsSiteId));
     var stockRowsHtml = stockList.length ? stockList.map(function (r) {
-      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + " " + escapeHtml(r.unit) + "</td></tr>";
-    }).join("") : '<tr><td colspan="3" class="empty-state">재고가 없어요</td></tr>';
+      return '<tr><td>' + escapeHtml(r.name) + "</td><td>" + escapeHtml(r.spec) + "</td><td>" + r.qty + "</td><td>" + escapeHtml(r.unit) + "</td></tr>";
+    }).join("") : '<tr><td colspan="4" class="empty-state">재고가 없어요</td></tr>';
 
     var pendingReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === currentMaterialsSiteId && r.status === "대기"; })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
@@ -3478,11 +3484,12 @@
         '<td>' + escapeHtml(r.team || "") + "</td>" +
         '<td>' + escapeHtml(r.name) + "</td>" +
         '<td>' + escapeHtml(r.spec || "") + "</td>" +
-        '<td>' + r.qty + " " + escapeHtml(r.unit || "") + "</td>" +
+        '<td>' + r.qty + "</td>" +
+        '<td>' + escapeHtml(r.unit || "") + "</td>" +
         '<td>' + escapeHtml(r.note || "") + "</td>" +
         '<td><button type="button" class="account-bar-btn" data-req-topo="' + r.id + '">발주 필요로 표시</button></td>' +
       "</tr>";
-    }).join("") : '<tr><td colspan="6" class="empty-state">대기 중인 요청이 없어요</td></tr>';
+    }).join("") : '<tr><td colspan="7" class="empty-state">대기 중인 요청이 없어요</td></tr>';
 
     // 발주가 필요하다고 표시된 요청들 (창고장 또는 관리자가 표시) — 실제 발주서는 아직 아니고, 여기서 업체·납기일을 정해 "발주완료" 처리해야 발주서 목록에 진짜로 올라간다.
     var orderReqs = (st.materialRequests || []).filter(function (r) { return r.siteId === currentMaterialsSiteId && r.status === "발주요청"; })
@@ -3492,12 +3499,13 @@
         '<td>' + escapeHtml(r.team || "") + "</td>" +
         '<td>' + escapeHtml(r.name) + "</td>" +
         '<td>' + escapeHtml(r.spec || "") + "</td>" +
-        '<td>' + r.qty + " " + escapeHtml(r.unit || "") + "</td>" +
+        '<td>' + r.qty + "</td>" +
+        '<td>' + escapeHtml(r.unit || "") + "</td>" +
         '<td><input type="text" id="reqVendor_' + r.id + '" placeholder="업체명" style="width:110px"></td>' +
         '<td><input type="date" id="reqExpected_' + r.id + '" style="width:130px"></td>' +
         '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-req-complete="' + r.id + '">발주완료</button></td>' +
       "</tr>";
-    }).join("") : '<tr><td colspan="7" class="empty-state">발주가 필요하다고 표시된 요청이 없어요</td></tr>';
+    }).join("") : '<tr><td colspan="8" class="empty-state">발주가 필요하다고 표시된 요청이 없어요</td></tr>';
 
     return '<div class="panel-caption" style="margin:-4px 0 14px">발주서 → 창고 입고 → 팀별 배부 → 사용/잔여관리 → 요청 순으로 돌아가는 자재 흐름을 여기서 관리해요.</div>' +
       '<div class="panel">' +
@@ -3527,14 +3535,14 @@
         '<div class="table-wrap"><table><thead><tr><th>업체</th><th>발주일</th><th>납기일</th><th>품목</th><th>상태</th></tr></thead><tbody>' + poRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">창고 재고 (선택한 현장)</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>품목</th><th>규격</th><th>수량</th><th>단위</th></tr></thead><tbody>' + stockRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">대기 중인 자재 요청</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>메모</th><th></th></tr></thead><tbody>' + reqRowsHtml + "</tbody></table></div>" +
       "</div>" +
       '<div class="panel"><h2 style="margin:0 0 10px">발주 요청</h2>' +
         '<div class="panel-caption" style="margin:0 0 10px">창고장 또는 관리자가 "발주 필요"로 표시한 항목이에요. 업체명·납기일을 입력하고 발주완료를 누르면 실제 발주서로 등록돼요.</div>' +
-        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>업체명</th><th>납기일</th><th></th></tr></thead><tbody>' + orderReqRowsHtml + "</tbody></table></div>" +
+        '<div class="table-wrap"><table><thead><tr><th>팀</th><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>업체명</th><th>납기일</th><th></th></tr></thead><tbody>' + orderReqRowsHtml + "</tbody></table></div>" +
       "</div>";
   }
   function collectPoItems() {
