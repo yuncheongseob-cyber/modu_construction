@@ -2,71 +2,73 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>현장 생산성 기록</title>
 <style id="app-css">
-  @import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+  @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
   :root {
-    --bg: #F3F5F4;
+    --bg: #F2F4F6;
     --surface: #FFFFFF;
-    --surface-2: #E9EDEB;
-    --surface-3: #DEE5E1;
-    --border: #D3DAD7;
-    --text: #1B2421;
-    --text-muted: #5B6B65;
-    --text-faint: #8B9893;
-    --accent: #E8630A;
+    --surface-2: #F5F6F8;
+    --surface-3: #E8EAED;
+    --border: #E1E4E8;
+    --text: #191F28;
+    --text-muted: #6B7684;
+    --text-faint: #9AA3AF;
+    --accent: #3182F6;
     --accent-ink: #FFFFFF;
-    --accent-soft: #FCE3D2;
-    --good: #2E7D4F;
-    --good-soft: #DFF0E5;
-    --warn: #A8720A;
-    --warn-soft: #FBEDD1;
-    --bad: #C4432B;
-    --bad-soft: #FBE2DC;
-    --shadow: 0 1px 2px rgba(20, 30, 27, 0.06), 0 4px 16px rgba(20, 30, 27, 0.06);
+    --accent-soft: #EAF2FE;
+    --good: #06A66E;
+    --good-soft: #E4F8EF;
+    --warn: #D97A0A;
+    --warn-soft: #FCF0DE;
+    --bad: #F04452;
+    --bad-soft: #FDECEE;
+    --shadow: 0 1px 2px rgba(25, 31, 40, 0.04), 0 6px 20px rgba(25, 31, 40, 0.06);
     --radius: 10px;
+    --radius-soft: 16px;
   }
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #14181A;
-      --surface: #1D2326;
-      --surface-2: #242B2E;
-      --surface-3: #2C3437;
-      --border: #37403F;
-      --text: #E8ECEA;
-      --text-muted: #9AA7A2;
-      --text-faint: #6C7975;
-      --accent: #FF8A3D;
-      --accent-ink: #1A1206;
-      --accent-soft: #3A2413;
-      --good: #4CAF75;
-      --good-soft: #1B3226;
-      --warn: #E0A82E;
-      --warn-soft: #362A0E;
-      --bad: #E2604A;
-      --bad-soft: #3A1F18;
+      --bg: #15181D;
+      --surface: #1E2229;
+      --surface-2: #262B33;
+      --surface-3: #2E343D;
+      --border: #383F4A;
+      --text: #F0F2F5;
+      --text-muted: #9AA3B2;
+      --text-faint: #6B7480;
+      --accent: #598EF3;
+      --accent-ink: #0B1220;
+      --accent-soft: #22314D;
+      --good: #26C081;
+      --good-soft: #16302A;
+      --warn: #E8A23B;
+      --warn-soft: #372B16;
+      --bad: #F16A76;
+      --bad-soft: #3A2126;
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
     }
   }
 
   :root[data-theme="dark"] {
-    --bg: #14181A;
-    --surface: #1D2326;
-    --surface-2: #242B2E;
-    --surface-3: #2C3437;
-    --border: #37403F;
-    --text: #E8ECEA;
-    --text-muted: #9AA7A2;
-    --text-faint: #6C7975;
-    --accent: #FF8A3D;
-    --accent-ink: #1A1206;
-    --accent-soft: #3A2413;
-    --good: #4CAF75;
-    --good-soft: #1B3226;
-    --warn: #E0A82E;
-    --warn-soft: #362A0E;
-    --bad: #E2604A;
-    --bad-soft: #3A1F18;
+    --bg: #15181D;
+    --surface: #1E2229;
+    --surface-2: #262B33;
+    --surface-3: #2E343D;
+    --border: #383F4A;
+    --text: #F0F2F5;
+    --text-muted: #9AA3B2;
+    --text-faint: #6B7480;
+    --accent: #598EF3;
+    --accent-ink: #0B1220;
+    --accent-soft: #22314D;
+    --good: #26C081;
+    --good-soft: #16302A;
+    --warn: #E8A23B;
+    --warn-soft: #372B16;
+    --bad: #F16A76;
+    --bad-soft: #3A2126;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 
@@ -75,14 +77,15 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: "IBM Plex Sans KR", "Pretendard", -apple-system, sans-serif;
+    font-family: "Pretendard", "IBM Plex Sans KR", -apple-system, BlinkMacSystemFont, sans-serif;
     -webkit-font-smoothing: antialiased;
     min-height: 100vh;
   }
   h1, h2, h3, .display {
-    font-family: "Barlow Semi Condensed", "IBM Plex Sans KR", sans-serif;
+    font-family: "Pretendard", "IBM Plex Sans KR", sans-serif;
+    font-weight: 700;
     text-wrap: balance;
-    letter-spacing: 0.01em;
+    letter-spacing: -0.01em;
   }
   .num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
   a { color: inherit; }
@@ -109,12 +112,12 @@
     justify-content: center;
     width: 34px;
     height: 34px;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--accent);
     color: var(--accent-ink);
-    font-family: "Barlow Semi Condensed", sans-serif;
+    font-family: "Pretendard", "IBM Plex Sans KR", sans-serif;
     font-weight: 700;
-    font-size: 17px;
+    font-size: 16px;
     flex: none;
   }
   .masthead h1 { font-size: 22px; font-weight: 700; margin: 0; }
@@ -162,7 +165,7 @@
     overflow: hidden;
   }
   .phone-topbar { background: var(--surface-2); padding: 14px 18px 12px; border-bottom: 1px solid var(--border); }
-  .phone-topbar .app-name { font-family: "Barlow Semi Condensed", sans-serif; font-weight: 700; font-size: 16px; }
+  .phone-topbar .app-name { font-family: "Pretendard", "IBM Plex Sans KR", sans-serif; font-weight: 700; font-size: 16px; }
   .phone-topbar .app-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   .phone-body { padding: 16px 18px 22px; }
 
@@ -172,11 +175,12 @@
     margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.04em;
   }
   .field input, .field select, .field textarea {
-    width: 100%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--surface); color: var(--text); font-size: 14.5px; font-family: inherit;
+    width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface-2); color: var(--text); font-size: 14.5px; font-family: inherit;
+    transition: border-color 0.12s ease, background 0.12s ease;
   }
   .field textarea { resize: vertical; min-height: 64px; }
-  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .field-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
   .range-inputs { display: flex; align-items: center; gap: 6px; }
@@ -235,7 +239,7 @@
   .storage-chip.bad { background: var(--bad-soft); color: var(--bad); }
 
   .section-title {
-    font-family: "Barlow Semi Condensed", sans-serif; font-weight: 600; font-size: 15px;
+    font-family: "Pretendard", "IBM Plex Sans KR", sans-serif; font-weight: 600; font-size: 15px;
     margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--surface-3);
     display: flex; align-items: center; justify-content: space-between;
   }
@@ -334,10 +338,12 @@
   .qty-item .unit { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--text-faint); pointer-events: none; }
 
   .submit-btn {
-    width: 100%; margin-top: 20px; padding: 13px; border: none; border-radius: 10px;
+    width: 100%; margin-top: 20px; padding: 14px; border: none; border-radius: 12px;
     background: var(--accent); color: var(--accent-ink); font-size: 15px; font-weight: 700;
-    font-family: "Barlow Semi Condensed", sans-serif; letter-spacing: 0.02em; cursor: pointer;
+    font-family: "Pretendard", "IBM Plex Sans KR", sans-serif; letter-spacing: -0.01em; cursor: pointer;
+    transition: background 0.12s ease, transform 0.08s ease;
   }
+  .submit-btn:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
   .submit-btn:active { transform: scale(0.985); }
   .submit-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
@@ -371,7 +377,7 @@
 
   .team-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .team-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
-  .team-card .tt { font-family: "Barlow Semi Condensed", sans-serif; font-weight: 700; font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .team-card .tt { font-family: "Pretendard", "IBM Plex Sans KR", sans-serif; font-weight: 700; font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
   .team-card .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .team-card .stat-line { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; color: var(--text-muted); }
   .team-card .stat-line .v { font-family: "IBM Plex Mono", monospace; color: var(--text); font-variant-numeric: tabular-nums; }
@@ -497,7 +503,7 @@
   .manday-total b { color: var(--text); font-family: "IBM Plex Mono", monospace; }
 
   .cal-monthnav { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 4px 0 12px; }
-  .cal-month-label { font-family: "Barlow Semi Condensed", sans-serif; font-weight: 700; font-size: 16.5px; min-width: 96px; text-align: center; }
+  .cal-month-label { font-family: "Pretendard", "IBM Plex Sans KR", sans-serif; font-weight: 700; font-size: 16.5px; min-width: 96px; text-align: center; }
   .cal-nav-btn {
     border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); width: 30px; height: 30px;
     border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -507,7 +513,7 @@
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 14px; }
   .cal-wd-label { text-align: center; font-size: 11px; font-weight: 600; color: var(--text-faint); padding-bottom: 4px; }
   .cal-wd-label.wd-sun { color: var(--bad); }
-  .cal-wd-label.wd-sat { color: #3B6FB6; }
+  .cal-wd-label.wd-sat { color: var(--accent); }
   .cal-cell {
     position: relative; aspect-ratio: 1; border: none; background: transparent; border-radius: 8px; cursor: pointer;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 2px;
@@ -763,7 +769,7 @@
   if (!state.materialTx) state.materialTx = []; // {id, siteId, type:"receive"|"distribute"|"use", name, spec, qty, team, poId, note, workerId, createdAt}
   if (!state.materialRequests) state.materialRequests = []; // {id, siteId, team, name, spec, qty, note, status:"대기"|"충족"|"발주요청"|"발주완료", vendor, expectedDate, requestedBy, createdAt, orderRequestedAt, resolvedAt}
 
-  var TEAM_COLORS = ["#E8630A", "#2E7D4F", "#3B6FB6", "#A8720A", "#8C4FBF", "#C4432B"];
+  var TEAM_COLORS = ["#3182F6", "#06A66E", "#F0854E", "#8B5CF6", "#F04452", "#0EA5A5"];
   function teamColor(teams, name) {
     var idx = teams.indexOf(name);
     if (idx < 0) idx = 0;
