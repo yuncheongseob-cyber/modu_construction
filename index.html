@@ -276,6 +276,17 @@
   .po-item-table input:focus { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
   .po-item-table input[type="number"] { font-family: "IBM Plex Mono", monospace; }
 
+  .po-items-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .po-items-list li {
+    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+    padding: 3px 0; border-bottom: 1px dashed var(--border);
+  }
+  .po-items-list li:last-child { border-bottom: none; }
+  .po-item-name { font-weight: 600; }
+  .po-item-spec { color: var(--text-faint); font-size: 12px; }
+  .po-item-qty { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--accent); white-space: nowrap; }
+  .po-items-empty { color: var(--text-faint); }
+
   .date-filter-wrap { position: relative; }
   .date-filter-btn {
     padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
@@ -823,6 +834,15 @@
   }
   function stockMapToList(map) {
     return Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+  }
+  // 발주서의 품목 목록을 한 줄로 뭉치지 않고, 품목별로 줄을 나눠서 보여준다.
+  function poItemsListHtml(items) {
+    if (!items || !items.length) return '<span class="po-items-empty">—</span>';
+    return '<ul class="po-items-list">' + items.map(function (it) {
+      return '<li><span class="po-item-name">' + escapeHtml(it.name) + "</span>" +
+        (it.spec ? '<span class="po-item-spec">' + escapeHtml(it.spec) + "</span>" : "") +
+        '<span class="po-item-qty">' + it.qty + escapeHtml(it.unit || "") + "</span></li>";
+    }).join("") + "</ul>";
   }
   function getDefectTypeOptions(st) { return (st.settings && st.settings.defectTypes && st.settings.defectTypes.length) ? st.settings.defectTypes : DEFAULT_DEFECT_TYPES; }
   function ensureSettingsList(key) {
@@ -2031,8 +2051,7 @@
     var incomingPos = (st.purchaseOrders || []).filter(function (p) { return p.siteId === siteId && p.status !== "입고완료"; })
       .sort(function (a, b) { return (a.expectedDate || "").localeCompare(b.expectedDate || ""); });
     var incomingHtml = incomingPos.length ? incomingPos.map(function (po) {
-      var itemsSummary = (po.items || []).map(function (it) { return escapeHtml(it.name) + (it.spec ? "(" + escapeHtml(it.spec) + ")" : "") + " " + it.qty + (it.unit || ""); }).join(", ");
-      return '<tr><td>' + escapeHtml(po.vendor || "") + "</td><td>" + escapeHtml(po.expectedDate || "") + "</td><td>" + itemsSummary + "</td>" +
+      return '<tr><td>' + escapeHtml(po.vendor || "") + "</td><td>" + escapeHtml(po.expectedDate || "") + "</td><td>" + poItemsListHtml(po.items) + "</td>" +
         '<td><button type="button" class="submit-btn" style="margin:0;padding:0 12px;height:32px" data-wh-receive="' + po.id + '">입고 처리</button></td></tr>';
     }).join("") : '<tr><td colspan="4" class="empty-state">입고 대기 중인 발주가 없어요</td></tr>';
 
@@ -3411,13 +3430,12 @@
     var pos = (st.purchaseOrders || []).filter(function (p) { return p.siteId === currentMaterialsSiteId; })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     var poRowsHtml = pos.length ? pos.map(function (po) {
-      var itemsSummary = (po.items || []).map(function (it) { return escapeHtml(it.name) + (it.spec ? "(" + escapeHtml(it.spec) + ")" : "") + " " + it.qty + (it.unit || ""); }).join(", ");
       var statusBadge = po.status === "입고완료" ? '<span class="settings-tag" style="color:var(--good)">입고완료</span>' : '<span class="settings-tag" style="color:var(--accent)">발주됨 (창고장 입고 확인 대기)</span>';
       return '<tr>' +
         '<td>' + escapeHtml(po.vendor || "") + "</td>" +
         '<td>' + escapeHtml(po.orderDate || "") + "</td>" +
         '<td>' + escapeHtml(po.expectedDate || "") + "</td>" +
-        '<td>' + itemsSummary + "</td>" +
+        '<td>' + poItemsListHtml(po.items) + "</td>" +
         '<td>' + statusBadge + "</td>" +
       "</tr>";
     }).join("") : '<tr><td colspan="5" class="empty-state">아직 등록된 발주서가 없어요</td></tr>';
