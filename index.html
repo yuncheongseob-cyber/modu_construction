@@ -1254,7 +1254,7 @@
   }
 
   // ---------------- domain helpers ----------------
-  // 공수(투입/환산공수)는 더 이상 실적 입력에서 직접 받지 않는다 — 팀원 각자가 "내 공수 캘린더"(mandayLog)에
+  // 투입공수는 더 이상 실적 입력에서 직접 받지 않는다 — 팀원 각자가 "내 공수 캘린더"(mandayLog)에
   // 입력한 값을 팀·날짜별로 모아서 쓴다. mandayValue()/mandayIndexByTeamDate()가 그 집계를 담당한다.
   function mandayValue(r) { return r.value != null ? r.value : mandayShiftValue(r.shifts); }
   function mandayIndexByTeamDate(log) {
@@ -1324,7 +1324,7 @@
     b.countable += countableQty(e);
   }
   function defectRate(b) { return b.countable > 0 ? (b.defectQty / b.countable * 100) : 0; }
-  // 인당설치가 아니라 "공수당설치"를 쓴다 — 시공량을 투입인원이 아니라 투입공수(workHours, 환산공수)로 나눈다.
+  // 인당설치가 아니라 "공수당설치"를 쓴다 — 시공량을 투입인원이 아니라 투입공수(workHours, 근무형태 가중치 적용)로 나눈다.
   function perPerson(qty, manHours) { return manHours > 0 ? (qty / manHours) : 0; }
   // mandayLog 기록 하나(팀원 한 명이 하루치 남긴 공수)를 집계 버킷에 반영한다 — 공수·투입인원·직종구성이 전부 여기서 나온다.
   function applyMandayRecordToBucket(b, r) {
@@ -2305,7 +2305,7 @@
           '<h2 style="margin:0">팀별 공수당설치 비교</h2>' +
           '<div class="toolbar-group"><span class="toolbar-label">조회 월</span><select id="fOverviewMonth">' + ovMonthOpts + "</select>" + csvBtnHtml("팀별_공수당설치_비교_" + currentOverviewMonth) + "</div>" +
         "</div>" +
-        '<div class="panel-caption">Duct·전선관 Pipe·케이블 포설, 선택한 달의 투입공수(환산공수) 기준 1공수당 시공량입니다. 매일 입력할수록 실시간으로 갱신돼요.</div>' +
+        '<div class="panel-caption">Duct·전선관 Pipe·케이블 포설, 선택한 달의 투입공수 기준 1공수당 시공량입니다. 매일 입력할수록 실시간으로 갱신돼요.</div>' +
         '<div class="table-scroll"><table>' +
           "<thead><tr><th>팀</th><th style=\"text-align:right\">Duct 공수당설치(M)</th><th style=\"text-align:right\">Pipe 공수당설치(M)</th><th style=\"text-align:right\">포설 공수당설치(M)</th><th style=\"text-align:right\">투입공수</th></tr></thead>" +
           "<tbody>" + (teams.length ? cmpRows : '<tr><td colspan="5"><div class="empty-state">팀이 없습니다</div></td></tr>') +
@@ -2316,7 +2316,7 @@
     var kpiHtml = '<div class="kpi-row">' +
       kpiTile("총 입력건수", fmt(entries.length), "건") +
       kpiTile("누적 투입인원", fmt(t.personnel), "명") +
-      kpiTile("누적 투입공수", fmt(t.manHours), "공수") +
+      kpiTile("누적 투입공수", fmt1(t.manHours), "공수") +
       kpiTile("전체 불량률", fmt1(defectRate(t)), "%") +
     "</div>";
 
@@ -2328,7 +2328,7 @@
       return '<div class="bar-row">' +
         '<span class="team-tag">' + escapeHtml(tm) + "</span>" +
         '<span class="bar-track"><span class="bar-fill" style="width:' + pct + "%;background:" + color + '"></span></span>' +
-        '<span class="bar-val">' + fmt(b.manHours) + "</span>" +
+        '<span class="bar-val">' + fmt1(b.manHours) + "</span>" +
       "</div>";
     }).join("");
 
@@ -2342,8 +2342,7 @@
       return '<div class="team-card">' +
         '<div class="tt"><span class="dot" style="background:' + color + '"></span>' + escapeHtml(tm) + "</div>" +
         statLine("투입인원", fmt(b.personnel) + "명") +
-        statLine("투입공수", fmt(b.manHours)) +
-        statLine("환산공수", fmt1(b.workHours) + "공수") +
+        statLine("투입공수", fmt1(b.manHours) + "공수") +
         statLine("케이블 포설", fmt(b.cable.layout) + " M") +
         statLine("불량률", fmt1(defectRate(b)) + "%") +
       "</div>";
@@ -2500,7 +2499,7 @@
     var kpiHtml = '<div class="kpi-row">' +
       kpiTile("입력건수", fmt(entries.length), "건") +
       kpiTile("투입인원", fmt(t.personnel), "명") +
-      kpiTile("투입공수", fmt(t.manHours), "공수") +
+      kpiTile("투입공수", fmt1(t.manHours), "공수") +
       kpiTile("불량수량", fmt(t.defectQty), "건") +
     "</div>";
 
@@ -2560,7 +2559,7 @@
     ];
     var rows2 = [
       { label: "투입인원", unit: "명", values: mapMonths(months, function (m) { return ma.byMonth[m].personnel; }) },
-      { label: "환산공수", unit: "공수", fmt: fmt1, values: mapMonths(months, function (m) { return ma.byMonth[m].workHours; }) },
+      { label: "투입공수", unit: "공수", fmt: fmt1, values: mapMonths(months, function (m) { return ma.byMonth[m].workHours; }) },
       { label: "생산수량", unit: "point·EA", values: mapMonths(months, function (m) { return ma.byMonth[m].countable; }) }
     ];
     var rows3 = getDefectTypeOptions(st).map(function (type) {
@@ -2573,7 +2572,7 @@
         buildStatTable(months, rows1) +
       "</div>" +
       '<div class="panel"><div class="panel-head-row"><h2>월별 투입공수</h2>' + csvBtnHtml("월별_투입공수") + "</div>" +
-        '<div class="panel-caption">환산공수 = "내 공수 캘린더"에 팀원들이 입력한 값의 합 (근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
+        '<div class="panel-caption">투입공수 = "내 공수 캘린더"에 팀원들이 입력한 값의 합 (근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
         buildStatTable(months, rows2) +
       "</div>" +
       '<div class="panel"><div class="panel-head-row"><h2>월별 불량 유형별 집계</h2>' + csvBtnHtml("월별_불량유형별_집계") + "</div>" +
@@ -2711,7 +2710,7 @@
 
       var rowsHtml =
         rowFor("투입인원", "명", function (b) { return b.personnel; }, monthAgg.personnel, fmt) +
-        rowFor("환산공수", "공수", function (b) { return b.workHours; }, monthAgg.workHours) +
+        rowFor("투입공수", "공수", function (b) { return b.workHours; }, monthAgg.workHours) +
         rowFor("포설 공수당설치", "M/공수", function (b) { return perPerson(b.cable.layout, b.workHours); }, perPerson(monthAgg.cable.layout, monthAgg.workHours));
 
       return '<div class="panel">' +
@@ -2738,7 +2737,7 @@
         '<div class="panel-caption">팀별 일자별 투입인원입니다.</div>' +
         teamPersonnelTable +
       "</div>" +
-      '<div class="panel-caption" style="margin:-4px 0 14px">팀별 생산성(일별) — 환산공수 = "내 공수 캘린더" 합계(근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
+      '<div class="panel-caption" style="margin:-4px 0 14px">팀별 생산성(일별) — 투입공수 = "내 공수 캘린더" 합계(근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
       teamProdHtml;
   }
 
@@ -2868,8 +2867,7 @@
       var groupDefs = [
         { title: "투입 (" + roleLine + ")", items: [
           ["투입인원", fmt(b.personnel), "명"],
-          ["투입공수(공수캘린더 합계)", fmt(b.manHours), "공수"],
-          ["환산공수", fmt1(b.workHours), "공수"]
+          ["투입공수", fmt1(b.manHours), "공수"]
         ] },
         { title: "Cable Duct", items: [
           ["Anchor", fmt(b.duct.anchor), "point"],
@@ -2909,7 +2907,7 @@
     }).join("");
 
     return toolbarHtml +
-      '<div class="panel-caption" style="margin:-4px 0 14px">공수당설치 = 해당 기간 시공량 ÷ 투입공수 (Duct·전선관 Pipe·케이블 포설 기준) · 환산공수 = "내 공수 캘린더" 합계(근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
+      '<div class="panel-caption" style="margin:-4px 0 14px">공수당설치 = 해당 기간 시공량 ÷ 투입공수 · 투입공수 = "내 공수 캘린더" 합계(근무형태 가중치: 조출0.5·주간1.0·연장0.5·야간1.0·철야2.0)</div>' +
       cardsHtml;
   }
 
@@ -2988,7 +2986,7 @@
           '</h2><span class="count">· 공수 합계 ' + fmt1(teamTotal) + "공수</span>" + '<span style="flex:1"></span>' +
           csvBtnHtml(escapeHtml(team) + "_" + currentMandayAdminMonth + "_공수표") +
         "</div>" +
-        '<div class="panel-caption" style="margin-bottom:8px">작업자 개인이 "내 공수 캘린더"에서 직접 입력한 값이에요. 관리자 대시보드의 "투입공수"·"환산공수"도 이 값을 그대로 사용해요.</div>' +
+        '<div class="panel-caption" style="margin-bottom:8px">작업자 개인이 "내 공수 캘린더"에서 직접 입력한 값이에요. 관리자 대시보드의 "투입공수"도 이 값을 그대로 사용해요.</div>' +
         '<div class="stat-table-wrap"><table class="stat-table">' +
           "<thead><tr><th class=\"rowlabel\">작업자</th>" + dayCols.map(function (dd) { return "<th>" + dd + "</th>"; }).join("") + "<th>합계</th></tr></thead>" +
           "<tbody>" + rowsHtml + totalRowHtml + "</tbody>" +
