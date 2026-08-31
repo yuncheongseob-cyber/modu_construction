@@ -249,10 +249,12 @@
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     flex-wrap: wrap; margin-bottom: 14px;
   }
-  .dash-toolbar .toolbar-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .dash-toolbar .toolbar-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; flex: none; }
+  .dash-toolbar .toolbar-group { min-width: 0; }
   .dash-toolbar select {
     padding: 8px 32px 8px 12px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--surface); color: var(--text); font-size: 13.5px; font-family: "IBM Plex Mono", monospace;
+    min-width: 0;
   }
   .dash-toolbar select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .dash-toolbar .toolbar-group { display: flex; align-items: center; gap: 8px; }
@@ -260,10 +262,11 @@
     display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 10px 14px;
     background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px;
   }
-  .dash-site-filter label { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+  .dash-site-filter label { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; flex: none; }
   .dash-site-filter select {
     padding: 7px 30px 7px 12px; border: 1px solid var(--accent); border-radius: 8px;
     background: var(--surface); color: var(--text); font-size: 13.5px; font-weight: 600; font-family: "IBM Plex Mono", monospace;
+    min-width: 0;
   }
 
   .po-item-table { border-collapse: collapse; width: 100%; }
@@ -740,14 +743,56 @@
     .team-cards { grid-template-columns: 1fr; }
     .team-highlight-row { grid-template-columns: 1fr 1fr; }
   }
-  @media (max-width: 560px) {
-    .dash-sidebar { width: 128px; padding: 8px 6px; }
-    .dash-sidebar button { padding: 8px 8px; font-size: 12.5px; gap: 8px; }
-    .worker-sidebar { width: 116px; padding: 10px 6px; }
-    .worker-sidebar-name { font-size: 12px; }
-    .worker-sidebar-meta { font-size: 10.5px; }
-    .worker-sidebar-nav button { padding: 8px 7px; font-size: 12px; gap: 7px; }
-    .worker-shell, .dash-shell { gap: 10px; }
+  /* ---- 모바일 폭: 일반적인 앱처럼 관리자는 햄버거+슬라이드 사이드바, 작업자는 하단 탭바로 전환 ---- */
+  .dash-mobile-topbar { display: none; }
+  .dash-sidebar-backdrop { display: none; }
+  @media (max-width: 780px) {
+    .worker-shell, .dash-shell { gap: 0; }
+
+    /* 관리자: 항목이 많아서(12개+) 항상-노출 사이드바 대신 햄버거로 열고 닫는 슬라이드 드로어로 전환 */
+    .dash-mobile-topbar {
+      display: flex; align-items: center; gap: 12px; margin: -4px -4px 14px; padding: 10px 4px;
+      position: sticky; top: 0; background: var(--bg); z-index: 20; border-bottom: 1px solid var(--border);
+    }
+    .dash-hamburger-btn {
+      flex: none; width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border);
+      background: var(--surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer;
+    }
+    .dash-hamburger-btn span { display: block; width: 16px; height: 2px; background: var(--text); border-radius: 2px; }
+    .dash-mobile-title { font-weight: 700; font-size: 15px; color: var(--text); }
+    .dash-sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0; width: 240px; max-width: 78vw; z-index: 60;
+      border-radius: 0; transform: translateX(-100%); transition: transform 0.22s ease; overflow-y: auto;
+    }
+    .dash-sidebar.open { transform: translateX(0); }
+    .dash-sidebar-backdrop {
+      display: block; position: fixed; inset: 0; background: rgba(10,20,35,0.45); z-index: 55;
+      opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+    }
+    .dash-sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
+    .dash-content { width: 100%; }
+
+    /* 작업자: 메뉴가 3~4개뿐이라 일반 앱처럼 하단 탭바로 전환, 계정 정보는 상단 바로 분리 */
+    .worker-shell { display: block; }
+    .worker-sidebar { position: static; width: 100%; border-radius: 0; padding: 0; }
+    .worker-sidebar-account {
+      position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--border);
+      border-radius: 0; padding: 10px 4px 10px; margin: -4px -4px 14px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .worker-sidebar-meta { display: none; }
+    .worker-sidebar-actions { margin-top: 0; flex-wrap: nowrap; }
+    .worker-sidebar-nav {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; flex-direction: row;
+      background: var(--surface); border-top: 1px solid var(--border); padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+      gap: 2px; box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+    }
+    .worker-sidebar-nav button {
+      flex: 1; flex-direction: column; gap: 3px; padding: 6px 2px; font-size: 10.5px; text-align: center;
+      min-width: 0;
+    }
+    .worker-sidebar-nav .nav-icon { width: auto; font-size: 18px; }
+    .worker-content { padding-bottom: 70px; }
   }
 </style>
 
@@ -2070,6 +2115,7 @@
 
   // ================= DASHBOARD: SIDEBAR ROUTER =================
   var currentDashPage = "overview";
+  var dashSidebarOpen = false; // 모바일 화면에서 사이드바를 햄버거로 열고 닫는 상태
   var currentDashDateFilter = "all";
   var currentDashSiteFilter = "all"; // "all" | a site id — scopes overview/monthly/daily/team/manday/attendance/log/photos to one 현장
   var logDateFilterOpen = false;
@@ -2283,8 +2329,15 @@
       st.teams = restore.teams;
     }
 
-    return '<div class="dash-shell"><nav class="dash-sidebar">' + buildDashSidebarHtml(page) + "</nav>" +
-      '<div class="dash-content">' + siteToolbarHtml + content + "</div></div>";
+    var activeNavItem = NAV_ITEMS.filter(function (i) { return i.key === page; })[0];
+    var mobileTopbarHtml = '<div class="dash-mobile-topbar">' +
+      '<button type="button" class="dash-hamburger-btn" data-dash-hamburger="1" aria-label="메뉴 열기"><span></span><span></span><span></span></button>' +
+      '<div class="dash-mobile-title">' + (activeNavItem ? activeNavItem.icon + " " + escapeHtml(activeNavItem.label) : "🏠 개요") + "</div>" +
+    "</div>";
+    return '<div class="dash-shell">' +
+      '<div class="dash-sidebar-backdrop' + (dashSidebarOpen ? " show" : "") + '" data-dash-backdrop="1"></div>' +
+      '<nav class="dash-sidebar' + (dashSidebarOpen ? " open" : "") + '">' + buildDashSidebarHtml(page) + "</nav>" +
+      '<div class="dash-content">' + mobileTopbarHtml + siteToolbarHtml + content + "</div></div>";
   }
 
   // ---- overview page ----
@@ -4942,7 +4995,21 @@
       var lockBtn = e.target.closest ? e.target.closest("[data-admin-lock]") : null;
       if (lockBtn) {
         isAdminUnlocked = false;
+        dashSidebarOpen = false;
         try { sessionStorage.removeItem(ADMIN_KEY); } catch (er) {}
+        renderDashView();
+        return;
+      }
+
+      var hamburgerBtn = e.target.closest ? e.target.closest("[data-dash-hamburger]") : null;
+      if (hamburgerBtn) {
+        dashSidebarOpen = !dashSidebarOpen;
+        renderDashView();
+        return;
+      }
+      var backdropBtn = e.target.closest ? e.target.closest("[data-dash-backdrop]") : null;
+      if (backdropBtn) {
+        dashSidebarOpen = false;
         renderDashView();
         return;
       }
@@ -5081,6 +5148,7 @@
       var navBtn = e.target.closest ? e.target.closest(".dash-sidebar button") : null;
       if (navBtn) {
         currentDashPage = navBtn.getAttribute("data-page");
+        dashSidebarOpen = false; // 모바일 드로어에서 메뉴 선택 시 자동으로 닫아준다
         renderDashView();
         return;
       }
