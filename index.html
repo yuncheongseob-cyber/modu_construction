@@ -1829,8 +1829,10 @@
   function buildMandayCalendarHtml(st) {
     var account = currentAccount();
     var workerId = account ? account.workerId : "";
-    var team = (account && account.team) || st.teams[0] || "";
-    var teamOpts = st.teams.map(function (t) {
+    var site = account && account.siteId ? findSite(st, account.siteId) : null;
+    var siteTeams = (site && site.teams && site.teams.length) ? site.teams : st.teams; // 소속 현장이 없으면(예: 예전 계정) 전체 팀으로 대체
+    var team = (account && account.team) || siteTeams[0] || "";
+    var teamOpts = siteTeams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === team ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("");
     var month = currentMandayMonth || todayStr().slice(0, 7);
@@ -1963,8 +1965,10 @@
   function buildAttendanceViewHtml(st) {
     var account = currentAccount();
     var workerId = account ? account.workerId : "";
-    var team = (account && account.team) || st.teams[0] || "";
-    var teamOpts = st.teams.map(function (t) {
+    var site = account && account.siteId ? findSite(st, account.siteId) : null;
+    var siteTeams = (site && site.teams && site.teams.length) ? site.teams : st.teams; // 소속 현장이 없으면(예: 예전 계정) 전체 팀으로 대체
+    var team = (account && account.team) || siteTeams[0] || "";
+    var teamOpts = siteTeams.map(function (t) {
       return '<option value="' + escapeHtml(t) + '"' + (t === team ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
     }).join("");
     var log = (st.attendance || []).filter(function (r) { return r.workerId === workerId; });
