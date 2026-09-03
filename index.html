@@ -397,6 +397,28 @@
   .team-card .stat-line .v { font-family: "IBM Plex Mono", monospace; color: var(--text); font-variant-numeric: tabular-nums; }
 
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ---- 근로계약서 / 개인정보동의서 전자서명 ---- */
+  .nav-badge { display: inline-block; min-width: 15px; padding: 1px 4px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 10px; font-weight: 700; text-align: center; line-height: 1.4; }
+  .contract-read { font-size: 13.5px; line-height: 1.65; color: var(--text); }
+  .contract-title { text-align: center; font-weight: 700; font-size: 16px; margin-bottom: 12px; letter-spacing: 0.04em; }
+  .contract-info-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+  .contract-info-table th, .contract-info-table td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; }
+  .contract-info-table th { background: var(--surface-2); font-weight: 600; width: 92px; white-space: nowrap; }
+  .contract-section-title { font-weight: 700; margin: 16px 0 4px; color: var(--accent); }
+  .contract-date-line { text-align: center; margin-top: 18px; font-weight: 600; }
+  .wage-detail-toggle { border: 1px solid var(--border); background: var(--surface); color: var(--accent); font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; cursor: pointer; margin-left: 4px; }
+  .wage-detail-wrap { margin: 8px 0 4px; }
+  .consent-clause-box { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; margin: 10px 0 4px; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); max-height: 260px; overflow-y: auto; }
+  .consent-clause-box p { margin: 0 0 12px; }
+  .consent-clause-box p:last-child { margin-bottom: 0; }
+  .contract-confirm-box { margin: 16px 0 4px; padding: 10px 12px; background: var(--surface-2); border-radius: 10px; }
+  .contract-sig-section { margin: 14px 0; }
+  .contract-sig-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+  .sig-pad { width: 100%; height: 160px; border: 1.5px dashed var(--border); border-radius: 10px; background: #fff; touch-action: none; display: block; }
+  .sig-pad-actions { margin-top: 6px; }
+  .contract-sig-block { margin-top: 14px; }
+  .contract-sig-img { max-width: 220px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
     text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
@@ -840,6 +862,15 @@
   if (!state.purchaseOrders) state.purchaseOrders = []; // {id, siteId, siteName, vendor, orderDate, expectedDate, status:"발주됨"|"입고완료", items:[{name,spec,qty,unit}], createdBy, createdAt}
   if (!state.materialTx) state.materialTx = []; // {id, siteId, type:"receive"|"distribute"|"use", name, spec, qty, team, poId, note, workerId, createdAt}
   if (!state.materialRequests) state.materialRequests = []; // {id, siteId, team, name, spec, qty, note, status:"대기"|"충족"|"발주요청"|"발주완료", vendor, expectedDate, requestedBy, createdAt, orderRequestedAt, resolvedAt}
+  // 근로계약서 전자서명: 관리자가 엑셀(워커별 시트)을 업로드하면 전화번호로 작업자 계정과 매칭해서 한 건씩 생성한다.
+  if (!state.laborContracts) state.laborContracts = []; // {id, workerId, phone, name, type:"monthly", contract:{...엑셀에서 뽑은 필드}, status:"대기서명"|"서명완료", signatureDataUrl, signedAt, uploadedAt}
+  // 개인정보 수집·이용 동의서: 최초 입사(가입) 시 1회만 받는다. workerId 기준 1건.
+  // 이 기능이 처음 배포되는 시점에 이미 가입돼 있던 작업자들은 소급으로 받지 않기로 했으므로,
+  // privacyConsents 자체가 아직 없던 상태(=이 기능 이전 데이터)라면 기존 계정은 전부 "예외"로 간주해서 게이트에 막히지 않게 한다.
+  if (!state.privacyConsents) {
+    state.privacyConsents = {}; // { [workerId]: {gender, birthdate, idType, idNumber, signatureDataUrl, agreedAt} } | {legacyExempt:true}
+    Object.keys(state.accounts || {}).forEach(function (wid) { state.privacyConsents[wid] = { legacyExempt: true, agreedAt: Date.now() }; });
+  }
 
   var TEAM_COLORS = ["#3182F6", "#06A66E", "#F0854E", "#8B5CF6", "#F04452", "#0EA5A5"];
   function teamColor(teams, name) {
@@ -955,6 +986,7 @@
     { key: "photos", icon: "🖼", label: "작업 사진" },
     { key: "sites", icon: "🏗️", label: "현장 관리" },
     { key: "materials", icon: "📦", label: "자재관리" },
+    { key: "contracts", icon: "✍️", label: "근로계약서" },
     { key: "settings", icon: "⚙️", label: "항목 설정" },
     { key: "storage", icon: "💾", label: "저장공간" }
   ];
@@ -1133,6 +1165,11 @@
           if (!state.purchaseOrders) state.purchaseOrders = [];
           if (!state.materialTx) state.materialTx = [];
           if (!state.materialRequests) state.materialRequests = [];
+          if (!state.laborContracts) state.laborContracts = [];
+          if (!state.privacyConsents) {
+            state.privacyConsents = {};
+            Object.keys(state.accounts || {}).forEach(function (wid) { state.privacyConsents[wid] = { legacyExempt: true, agreedAt: Date.now() }; });
+          }
           firebaseSyncedOnce = true;
           renderDashView(); // safe to refresh (read-only view); the input form is left alone so in-progress typing isn't wiped
           setSyncStatus(true, "실시간 동기화됨");
@@ -1681,9 +1718,12 @@
   function buildInputViewHtml(st) {
     if (!isLoggedIn(st)) return buildAuthGateHtml(st);
     var account = currentAccount();
+    // 개인정보 수집·이용 동의서는 최초 입사(가입) 시 1회만 받으면 되므로, 아직 안 했다면 다른 화면보다 먼저 이걸 막아선다.
+    if (!st.privacyConsents || !st.privacyConsents[account.workerId]) return buildPrivacyConsentGateHtml(st, account);
     var isWarehouse = account.role === WAREHOUSE_ROLE;
     var isLead = account.role === LEAD_ROLE;
     if (isWarehouse && currentInputTab !== "materials" && currentInputTab !== "attendance") currentInputTab = "materials";
+    var pendingContract = (st.laborContracts || []).filter(function (r) { return r.workerId === account.workerId && r.status === "대기서명"; })[0];
     var navBtnsHtml = "";
     if (!isWarehouse) {
       navBtnsHtml += '<button type="button" class="' + (currentInputTab === "entry" ? "active" : "") + '" data-itab="entry"><span class="nav-icon">📋</span><span>실적 입력</span></button>' +
@@ -1693,6 +1733,7 @@
     if (isWarehouse || isLead) {
       navBtnsHtml += '<button type="button" class="' + (currentInputTab === "materials" ? "active" : "") + '" data-itab="materials"><span class="nav-icon">📦</span><span>자재</span></button>';
     }
+    navBtnsHtml += '<button type="button" class="' + (currentInputTab === "contracts" ? "active" : "") + '" data-itab="contracts"><span class="nav-icon">✍️</span><span>계약서' + (pendingContract ? ' <span class="nav-badge">1</span>' : "") + "</span></button>";
     var sidebarHtml = '<nav class="worker-sidebar">' +
       '<div class="worker-sidebar-account">' +
         '<div class="worker-sidebar-name">👤 ' + escapeHtml(account.name || account.workerId) + "</div>" +
@@ -1707,6 +1748,7 @@
     var body = currentInputTab === "manday" ? buildMandayCalendarHtml(st) :
       currentInputTab === "attendance" ? buildAttendanceViewHtml(st) :
       currentInputTab === "materials" ? (isWarehouse ? buildWarehouseMaterialsHtml(st, account) : buildLeadMaterialsHtml(st, account)) :
+      currentInputTab === "contracts" ? buildContractSignHtml(st, account) :
       buildEntryFormHtml(st);
     return '<div class="worker-shell">' + sidebarHtml + '<div class="worker-content">' + body + "</div></div>";
   }
@@ -2263,6 +2305,172 @@
       "</div>";
   }
 
+  // ---- 작업자 화면: 근로계약서 읽고 서명하기 ----
+  function buildContractSignHtml(st, account) {
+    var pending = (st.laborContracts || []).filter(function (r) { return r.workerId === account.workerId && r.status === "대기서명"; })[0];
+    if (!pending) {
+      var signedList = (st.laborContracts || []).filter(function (r) { return r.workerId === account.workerId && r.status === "서명완료"; })
+        .sort(function (a, b) { return (b.signedAt || 0) - (a.signedAt || 0); });
+      if (!signedList.length) return emptyPanel("계약서", "현재 확인할 계약서가 없어요. 관리자가 계약서를 보내면 여기에 나타나요.");
+      var rowsHtml = signedList.map(function (r) {
+        return '<tr><td>' + escapeHtml(r.contract.contractStart || "") + " ~ " + escapeHtml(r.contract.contractEnd || "") + "</td><td>" + escapeHtml(fmtDateTime(r.signedAt)) + '</td><td><button type="button" class="account-bar-btn" data-contract-self-view="' + r.id + '">보기</button></td></tr>';
+      }).join("");
+      return '<div class="panel"><h2 style="margin:0 0 10px">서명 완료한 계약서</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>계약기간</th><th>서명일시</th><th></th></tr></thead><tbody>' + rowsHtml + "</tbody></table></div>" +
+      "</div>";
+    }
+    return '<div class="panel"><h2 style="margin:0 0 4px">근로계약서 확인 및 서명</h2>' +
+      '<div class="panel-caption" style="margin:0 0 14px">아래 내용을 끝까지 확인한 뒤, 맨 아래에서 서명해주세요.</div>' +
+      buildMonthlyContractBodyHtml(pending.contract) +
+      '<div class="contract-confirm-box">' +
+        '<label class="remember-check"><input type="checkbox" id="contractConfirmRead"> 위 계약 내용을 모두 확인했습니다</label>' +
+      "</div>" +
+      '<div class="contract-sig-section" id="contractSigSection" hidden>' +
+        '<div class="contract-sig-label">근로자(을) 서명</div>' +
+        '<canvas id="contractSigCanvas" class="sig-pad"></canvas>' +
+        '<div class="sig-pad-actions">' +
+          '<button type="button" class="btn-secondary" id="contractSigClear">다시 서명</button>' +
+        "</div>" +
+      "</div>" +
+      '<button type="button" class="submit-btn" id="btnContractSign" disabled data-contract-id="' + pending.id + '">서명 완료</button>' +
+    "</div>";
+  }
+  function wireContractSign() {
+    var scopeEl = document.getElementById("viewInput");
+    if (!scopeEl) return;
+    wireWageDetailToggle(scopeEl);
+    Array.prototype.forEach.call(scopeEl.querySelectorAll("[data-contract-self-view]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-contract-self-view");
+        var row = (state.laborContracts || []).filter(function (r) { return r.id === id; })[0];
+        if (row) openContractViewModal(row);
+      });
+    });
+    var confirmChk = document.getElementById("contractConfirmRead");
+    var sigSection = document.getElementById("contractSigSection");
+    var signBtn = document.getElementById("btnContractSign");
+    if (!confirmChk || !signBtn) return;
+    var sigPad = wireSignaturePad("contractSigCanvas");
+    function refreshSignEnabled() {
+      signBtn.disabled = !confirmChk.checked || !sigPad || sigPad.isEmpty();
+    }
+    confirmChk.addEventListener("change", function () {
+      if (sigSection) sigSection.hidden = !confirmChk.checked;
+      refreshSignEnabled();
+    });
+    if (sigSection) {
+      sigSection.addEventListener("mouseup", refreshSignEnabled);
+      sigSection.addEventListener("touchend", refreshSignEnabled);
+    }
+    var clearBtn = document.getElementById("contractSigClear");
+    if (clearBtn) clearBtn.addEventListener("click", function () { if (sigPad) sigPad.clear(); refreshSignEnabled(); });
+    signBtn.addEventListener("click", function () {
+      if (!sigPad || sigPad.isEmpty()) { showToast("서명을 해주세요"); return; }
+      var id = signBtn.getAttribute("data-contract-id");
+      var row = (state.laborContracts || []).filter(function (r) { return r.id === id; })[0];
+      if (!row) return;
+      row.status = "서명완료";
+      row.signatureDataUrl = sigPad.toDataURL();
+      row.signedAt = Date.now();
+      persist(function (ok) { if (ok) { showToast("서명이 완료됐어요"); renderInputView(); } });
+    });
+  }
+
+  // ---- 작업자 화면: 개인정보 수집·이용 동의서 (최초 입사시 1회) ----
+  var PRIVACY_ID_TYPES = [
+    { key: "resident", label: "주민등록번호" },
+    { key: "license", label: "운전면허번호" },
+    { key: "passport", label: "여권번호" },
+    { key: "foreigner", label: "외국인등록번호" }
+  ];
+  function buildPrivacyConsentGateHtml(st, account) {
+    var idTypeOptsHtml = PRIVACY_ID_TYPES.map(function (t, idx) {
+      return '<label class="remember-check" style="display:block;margin-bottom:6px"><input type="radio" name="consentIdType" value="' + t.key + '"' + (idx === 0 ? " checked" : "") + "> " + t.label + "</label>";
+    }).join("");
+    return '<div class="phone-wrap"><div class="phone" style="max-width:460px">' +
+      '<div class="phone-topbar"><div class="app-name">📝 개인정보 수집·이용 동의서</div><div class="app-sub">최초 입사시 1회만 작성하면 돼요</div></div>' +
+      '<div class="phone-body">' +
+        '<div class="panel-caption" style="margin:0 0 14px">' + escapeHtml(account.name || account.workerId) + '님, 근로계약 체결을 위해 아래 개인정보 수집·이용·제공 및 보안서약에 동의해주세요.</div>' +
+        '<table class="contract-info-table" style="margin-bottom:14px">' +
+          "<tr><th>성명</th><td>" + escapeHtml(account.name || account.workerId) + "</td></tr>" +
+        "</table>" +
+        '<div class="field"><label>생년월일</label><input type="text" id="consentBirthdate" placeholder="예: 900101"></div>' +
+        '<div class="field"><label>성별</label>' +
+          '<label class="remember-check" style="display:inline-block;margin-right:16px"><input type="radio" name="consentGender" value="남" checked> 남</label>' +
+          '<label class="remember-check" style="display:inline-block"><input type="radio" name="consentGender" value="여"> 여</label>' +
+        "</div>" +
+        '<div class="consent-clause-box">' +
+          '<p><b>1. 수집·이용에 관한 사항</b><br>목적: 직원 채용(근로계약) 및 사무소 운영에 필요한 필수 정보 수집.<br>' +
+          '항목: 성명, 주민번호, 주소, 연락처, 전자메일 등 개인식별정보.<br>' +
+          '보유기간: 퇴사 등 근로계약 종료·해지일까지(단, 근로기준법·4대보험 관련 필수정보는 관련 법령상 보존기간까지 보관).<br>' +
+          '※ 위 수집·이용 동의는 근로계약 체결을 위해 필수이며, 거부시 채용에 제한이 있을 수 있습니다.</p>' +
+          '<p><b>2. 제공에 관한 사항</b><br>제공받는 자: 한국세무사회 및 세무회계프로그램 유지보수업체 등 수탁·제휴업체.<br>' +
+          '이용목적: 회원사무소 직원 등록·관리, 인사·급여 관리 및 백업.<br>' +
+          '제공 정보: 성명·주민번호·주소·연락처·전자우편 등 개인식별정보, 경력·학력·자격 관련사항.<br>' +
+          '보유기간: 제공일로부터 동의 철회 또는 목적 달성시까지.<br>' +
+          '※ 위 제공 동의 역시 근로계약 체결을 위해 필수이며, 거부시 채용에 제한이 있을 수 있습니다.</p>' +
+          '<p><b>3. 보안서약서</b><br>본인은 업무 수행 중 취득한 고객의 개인정보를 보호하고 회사 영업비밀 보호 의무를 준수하며, ' +
+          '위반하거나 고의·과실로 피해가 발생한 경우 손해배상 등 모든 법적 책임이 본인에게 있음을 서약합니다.</p>' +
+        "</div>" +
+        '<div class="field"><label>4. 고유식별정보 종류 (해당하는 것 1개만 선택)</label>' + idTypeOptsHtml + "</div>" +
+        '<div class="field"><label id="consentIdNumberLabel">주민등록번호</label><input type="text" id="consentIdNumber" placeholder="번호를 입력하세요"></div>' +
+        '<div class="contract-confirm-box">' +
+          '<label class="remember-check"><input type="checkbox" id="consentConfirmRead"> 개인정보 수집·이용·제공 및 보안서약 내용에 모두 동의합니다</label>' +
+        "</div>" +
+        '<div class="contract-sig-section" id="consentSigSection" hidden>' +
+          '<div class="contract-sig-label">동의인 서명</div>' +
+          '<canvas id="consentSigCanvas" class="sig-pad"></canvas>' +
+          '<div class="sig-pad-actions"><button type="button" class="btn-secondary" id="consentSigClear">다시 서명</button></div>' +
+        "</div>" +
+        '<button type="button" class="submit-btn" id="btnConsentSign" disabled>동의하고 서명 완료</button>' +
+      "</div>" +
+    "</div></div>";
+  }
+  function wirePrivacyConsentGate() {
+    var idNumberLabel = document.getElementById("consentIdNumberLabel");
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="consentIdType"]'), function (radio) {
+      radio.addEventListener("change", function () {
+        var t = PRIVACY_ID_TYPES.filter(function (x) { return x.key === radio.value; })[0];
+        if (idNumberLabel && t) idNumberLabel.textContent = t.label;
+      });
+    });
+    var confirmChk = document.getElementById("consentConfirmRead");
+    var sigSection = document.getElementById("consentSigSection");
+    var signBtn = document.getElementById("btnConsentSign");
+    if (!confirmChk || !signBtn) return;
+    var sigPad = wireSignaturePad("consentSigCanvas");
+    function refreshSignEnabled() {
+      signBtn.disabled = !confirmChk.checked || !sigPad || sigPad.isEmpty();
+    }
+    confirmChk.addEventListener("change", function () {
+      if (sigSection) sigSection.hidden = !confirmChk.checked;
+      refreshSignEnabled();
+    });
+    if (sigSection) {
+      sigSection.addEventListener("mouseup", refreshSignEnabled);
+      sigSection.addEventListener("touchend", refreshSignEnabled);
+    }
+    var clearBtn = document.getElementById("consentSigClear");
+    if (clearBtn) clearBtn.addEventListener("click", function () { if (sigPad) sigPad.clear(); refreshSignEnabled(); });
+    signBtn.addEventListener("click", function () {
+      if (!sigPad || sigPad.isEmpty()) { showToast("서명을 해주세요"); return; }
+      var account = currentAccount();
+      if (!account) return;
+      var idTypeEl = document.querySelector('input[name="consentIdType"]:checked');
+      var genderEl = document.querySelector('input[name="consentGender"]:checked');
+      if (!state.privacyConsents) state.privacyConsents = {};
+      state.privacyConsents[account.workerId] = {
+        gender: genderEl ? genderEl.value : "",
+        birthdate: (document.getElementById("consentBirthdate") || {}).value || "",
+        idType: idTypeEl ? idTypeEl.value : "resident",
+        idNumber: (document.getElementById("consentIdNumber") || {}).value || "",
+        signatureDataUrl: sigPad.toDataURL(),
+        agreedAt: Date.now()
+      };
+      persist(function (ok) { if (ok) { showToast("동의서 작성이 완료됐어요"); renderInputView(); } });
+    });
+  }
+
   function buildDashSidebarHtml(active) {
     return NAV_ITEMS.map(function (item) {
       return '<button type="button" class="' + (item.key === active ? "active" : "") + '" data-page="' + item.key + '">' +
@@ -2319,6 +2527,7 @@
     else if (page === "photos") content = buildPhotoGalleryHtml(st.entries, st.teams);
     else if (page === "sites") content = buildSitesPageHtml(st);
     else if (page === "materials") content = buildMaterialsPageHtml(st);
+    else if (page === "contracts") content = buildContractsAdminPageHtml(st);
     else if (page === "settings") content = buildSettingsPageHtml(st);
     else if (page === "storage") content = buildStoragePanelHtml(st);
     else content = buildOverviewPageHtml(st);
@@ -3787,6 +3996,284 @@
       });
     });
   }
+  // ================= 근로계약서 전자서명 (월정직 / 관리자용) =================
+  // 엑셀 워크북 구조: 첫 시트는 빈 템플릿, 그 뒤로 워커별 시트(시트명 = 이름)가 이어진다.
+  // 각 워커 시트는 셀 좌표가 완전히 고정돼 있어서(청섭님 회사 양식 기준) 좌표로 바로 읽는다.
+  var MONTHLY_CONTRACT_CELLS = {
+    company: "H3", siteName: "S3", name: "H4", residentNum: "S4",
+    address: "H5", phone: "V5", contractStart: "H8", contractEnd: "P8",
+    monthlyWageTotal: "P16", wageBase: "H18", wageWeekly: "K18", wageOvertime: "P18",
+    wageAnnual: "T18", wageHoliday: "X18", contractDateLine: "A62",
+    companyRepLine: "A65"
+  };
+  function normalizePhoneDigits(s) { return (s || "").toString().replace(/[^0-9]/g, ""); }
+  function cellVal(ws, ref) {
+    var c = ws[ref];
+    return c && c.v != null ? c.v : "";
+  }
+  // 시트 하나를 파싱해서 워커 계약 데이터로 변환. 이름/주민번호가 없으면 워커 시트가 아니라고 보고 null.
+  function parseMonthlyContractSheet(sheetName, ws) {
+    var name = (cellVal(ws, MONTHLY_CONTRACT_CELLS.name) || "").toString().replace(/\s+/g, "");
+    var residentNum = cellVal(ws, MONTHLY_CONTRACT_CELLS.residentNum);
+    if (!name || !residentNum) return null;
+    var c = {};
+    Object.keys(MONTHLY_CONTRACT_CELLS).forEach(function (k) { c[k] = cellVal(ws, MONTHLY_CONTRACT_CELLS[k]); });
+    c.sheetName = sheetName;
+    c.name = name;
+    return c;
+  }
+  function findAccountByPhone(st, phone) {
+    var digits = normalizePhoneDigits(phone);
+    if (!digits) return null;
+    var accounts = st.accounts || {};
+    var found = Object.keys(accounts).filter(function (id) { return normalizePhoneDigits(accounts[id].phone) === digits; });
+    return found.length ? accounts[found[0]] : null;
+  }
+
+  var contractUploadPreview = null; // [{sheetName, contract, account}] — 업로드 직후 매칭 결과를 확정 발송 전까지 보여준다.
+
+  function buildContractsAdminPageHtml(st) {
+    var list = (st.laborContracts || []).slice().sort(function (a, b) { return (b.uploadedAt || 0) - (a.uploadedAt || 0); });
+    var previewHtml = "";
+    if (contractUploadPreview) {
+      var rows = contractUploadPreview.map(function (row, idx) {
+        var matchHtml = row.account
+          ? '<span class="settings-tag" style="color:var(--good)">✓ ' + escapeHtml(row.account.name || row.account.workerId) + " (" + escapeHtml(row.account.workerId) + ")</span>"
+          : '<span class="settings-tag" style="color:var(--bad)">전화번호로 매칭되는 계정 없음</span>';
+        return '<tr><td>' + escapeHtml(row.sheetName) + "</td><td>" + escapeHtml(row.contract.name) + "</td><td>" + escapeHtml(row.contract.phone || "") + "</td><td>" + matchHtml + "</td></tr>";
+      }).join("");
+      var matchedCount = contractUploadPreview.filter(function (r) { return r.account; }).length;
+      previewHtml = '<div class="panel"><h2 style="margin:0 0 10px">업로드 미리보기 (' + matchedCount + "/" + contractUploadPreview.length + " 명 매칭됨)</h2>" +
+        '<div class="panel-caption" style="margin:0 0 10px">전화번호로 앱 계정과 자동 매칭했어요. 매칭 안 된 사람은 먼저 앱에 가입시킨 뒤 다시 올려주세요.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>시트명</th><th>성명</th><th>연락처</th><th>매칭 결과</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+        '<div class="modal-actions" style="justify-content:flex-start;margin-top:14px">' +
+          '<button type="button" class="submit-btn" id="btnContractConfirmSend" style="max-width:220px"' + (matchedCount ? "" : " disabled") + '>매칭된 ' + matchedCount + '명에게 발송</button> ' +
+          '<button type="button" class="btn-secondary" id="btnContractCancelPreview">취소</button>' +
+        "</div>" +
+      "</div>";
+    }
+    var statusRows = list.length ? list.map(function (row) {
+      var statusHtml = row.status === "서명완료"
+        ? '<span class="settings-tag" style="color:var(--good)">✓ 서명완료</span>'
+        : '<span class="settings-tag" style="color:var(--accent)">대기중</span>';
+      var actionsHtml = row.status === "서명완료"
+        ? '<button type="button" class="account-bar-btn" data-contract-view="' + row.id + '">보기</button>'
+        : '<button type="button" class="account-bar-btn" data-contract-cancel="' + row.id + '">발송취소</button>';
+      return '<tr><td>' + escapeHtml(row.contract.name) + "</td><td>" + escapeHtml(row.contract.phone || "") + "</td><td>" + escapeHtml(row.contract.contractStart || "") + " ~ " + escapeHtml(row.contract.contractEnd || "") + "</td><td>" + statusHtml + "</td><td>" + actionsHtml + "</td></tr>";
+    }).join("") : '<tr><td colspan="5" class="empty-state">아직 발송한 계약서가 없어요</td></tr>';
+
+    return '<div class="panel-caption" style="margin:-4px 0 14px">✍️ 근로계약서 엑셀(워커별 시트)을 올리면 전화번호로 작업자 계정을 찾아 서명 요청을 보내요.</div>' +
+      '<div class="panel"><h2 style="margin:0 0 10px">계약서 엑셀 업로드</h2>' +
+        '<div class="panel-caption" style="margin:0 0 10px">월정직(관리자) 양식 기준이에요. 첫 시트(빈 템플릿)는 자동으로 건너뛰어요.</div>' +
+        '<label class="account-bar-btn" for="contractFileInput" style="cursor:pointer;display:inline-block">📎 엑셀 파일 선택</label>' +
+        '<input type="file" id="contractFileInput" accept=".xlsx,.xls" style="display:none">' +
+        '<span id="contractFileStatus" style="margin-left:10px;color:var(--text-muted);font-size:12.5px"></span>' +
+      "</div>" +
+      previewHtml +
+      '<div class="panel"><h2 style="margin:0 0 10px">발송 현황</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>성명</th><th>연락처</th><th>계약기간</th><th>상태</th><th></th></tr></thead><tbody>' + statusRows + "</tbody></table></div>" +
+      "</div>";
+  }
+
+  function wireContractsAdminPage() {
+    var fileInput = document.getElementById("contractFileInput");
+    if (fileInput) fileInput.addEventListener("change", function () {
+      var file = this.files && this.files[0];
+      this.value = "";
+      if (!file) return;
+      var statusEl = document.getElementById("contractFileStatus");
+      if (statusEl) statusEl.textContent = "읽는 중…";
+      ensureXlsx(function (ok) {
+        if (!ok) { if (statusEl) statusEl.textContent = ""; showToast("엑셀 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해주세요"); return; }
+        var reader = new FileReader();
+        reader.onload = function () {
+          if (statusEl) statusEl.textContent = "";
+          try {
+            var wb = XLSX.read(reader.result, { type: "array" });
+            var rows = [];
+            wb.SheetNames.forEach(function (sn) {
+              var ws = wb.Sheets[sn];
+              var contract = parseMonthlyContractSheet(sn, ws);
+              if (!contract) return; // 빈 템플릿 시트 등은 건너뜀
+              var account = findAccountByPhone(state, contract.phone);
+              rows.push({ sheetName: sn, contract: contract, account: account });
+            });
+            if (!rows.length) { showToast("워커별 시트를 찾지 못했어요. 양식을 확인해주세요"); return; }
+            contractUploadPreview = rows;
+            renderDashView();
+          } catch (e) { showToast("파일을 해석하지 못했어요. 형식을 확인해주세요"); }
+        };
+        reader.onerror = function () { if (statusEl) statusEl.textContent = ""; showToast("파일을 읽지 못했어요"); };
+        reader.readAsArrayBuffer(file);
+      });
+    });
+    var confirmBtn = document.getElementById("btnContractConfirmSend");
+    if (confirmBtn) confirmBtn.addEventListener("click", function () {
+      var matched = (contractUploadPreview || []).filter(function (r) { return r.account; });
+      if (!matched.length) return;
+      matched.forEach(function (row) {
+        // 같은 사람에게 이미 대기중인 계약서가 있으면 새로 만들지 않고 덮어쓴다 (재발송).
+        var existing = (state.laborContracts || []).filter(function (r) { return r.workerId === row.account.workerId && r.status === "대기서명"; })[0];
+        if (existing) {
+          existing.contract = row.contract;
+          existing.uploadedAt = Date.now();
+        } else {
+          state.laborContracts.push({
+            id: uid(), workerId: row.account.workerId, phone: row.contract.phone, type: "monthly",
+            contract: row.contract, status: "대기서명", uploadedAt: Date.now()
+          });
+        }
+      });
+      contractUploadPreview = null;
+      persist(function (ok) { if (ok) { showToast(matched.length + "명에게 계약서를 발송했어요"); renderDashView(); } });
+    });
+    var cancelBtn = document.getElementById("btnContractCancelPreview");
+    if (cancelBtn) cancelBtn.addEventListener("click", function () { contractUploadPreview = null; renderDashView(); });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-contract-cancel]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-contract-cancel");
+        state.laborContracts = (state.laborContracts || []).filter(function (r) { return r.id !== id; });
+        persist(function (ok) { if (ok) { showToast("발송을 취소했어요"); renderDashView(); } });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-contract-view]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-contract-view");
+        var row = (state.laborContracts || []).filter(function (r) { return r.id === id; })[0];
+        if (row) openContractViewModal(row);
+      });
+    });
+  }
+
+  function openContractViewModal(row) {
+    var existing = document.getElementById("contractViewOverlay");
+    if (existing) existing.parentNode.removeChild(existing);
+    var overlay = document.createElement("div");
+    overlay.id = "contractViewOverlay";
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card" style="max-width:640px;max-height:88vh">' +
+      '<h3 style="margin:0 0 10px">' + escapeHtml(row.contract.name) + ' 근로계약서</h3>' +
+      buildMonthlyContractBodyHtml(row.contract) +
+      (row.signatureDataUrl ? '<div class="contract-sig-block"><div class="contract-sig-label">서명 (' + escapeHtml(fmtDateTime(row.signedAt)) + ')</div><img src="' + row.signatureDataUrl + '" class="contract-sig-img"></div>' : "") +
+      '<div class="modal-actions"><button type="button" class="btn-secondary" id="contractViewClose">닫기</button></div>' +
+    "</div>";
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", function (ev) { if (ev.target === overlay) overlay.parentNode.removeChild(overlay); });
+    document.getElementById("contractViewClose").addEventListener("click", function () { overlay.parentNode.removeChild(overlay); });
+    wireWageDetailToggle(overlay);
+  }
+  // 임금 상세 계산 표는 평소엔 접어두고, 버튼을 눌러야 펼쳐지게 한다 (계약서·서명화면·미리보기 공통 사용).
+  function wireWageDetailToggle(scopeEl) {
+    var btn = scopeEl.querySelector("[data-wage-toggle]");
+    var wrap = scopeEl.querySelector("#wageDetailWrap");
+    if (!btn || !wrap) return;
+    btn.addEventListener("click", function () {
+      wrap.hidden = !wrap.hidden;
+      btn.textContent = wrap.hidden ? "임금 상세 계산 보기 ▾" : "임금 상세 계산 접기 ▴";
+    });
+  }
+  function fmtDateTime(ts) {
+    if (!ts) return "";
+    var d = new Date(ts);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + " " +
+      String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  // 계약서 본문은 회사 취업규칙 문구 그대로 고정 템플릿으로 두고, 사람마다 다른 값(이름·주민번호·주소·연락처·급여 등)만 채워 넣는다.
+  // (스캔 이미지가 아니라 텍스트라서 모바일에서 읽기 편하고, 워딩이 바뀌면 이 함수만 고치면 된다.)
+  function buildMonthlyContractBodyHtml(c) {
+    var wageRows = [
+      ["기본급", c.wageBase], ["주휴수당", c.wageWeekly], ["시간외근로수당", c.wageOvertime],
+      ["연차수당", c.wageAnnual], ["유급휴일수당", c.wageHoliday]
+    ].map(function (r) {
+      return '<tr><td>' + r[0] + "</td><td class=\"num\">" + (typeof r[1] === "number" ? fmt(r[1]) + "원" : escapeHtml(r[1] || "")) + "</td></tr>";
+    }).join("");
+    return '<div class="contract-read">' +
+      '<div class="contract-title">근 로 계 약 서 (계약직)</div>' +
+      '<table class="contract-info-table">' +
+        "<tr><th>사용자(갑)</th><td>" + escapeHtml(c.company || "") + "</td><th>현장명</th><td>" + escapeHtml(c.siteName || "") + "</td></tr>" +
+        "<tr><th>근로자(을)</th><td>" + escapeHtml(c.name || "") + "</td><th>생년월일</th><td>" + escapeHtml((c.residentNum || "").toString().slice(0, 6)) + "</td></tr>" +
+        "<tr><th>주소</th><td colspan=\"3\">" + escapeHtml(c.address || "") + "</td></tr>" +
+        "<tr><th>연락처</th><td colspan=\"3\">" + escapeHtml(c.phone || "") + "</td></tr>" +
+      "</table>" +
+      '<p>"갑"과 "을"은 아래의 근로조건을 상호간에 성실히 이행할 것을 약정한다.</p>' +
+      '<div class="contract-section-title">1. 근로계약기간</div>' +
+      "<p>" + escapeHtml(c.contractStart || "") + " ~ " + escapeHtml(c.contractEnd || "") + " 으로 한다. 본 계약기간은 계약기간의 만료로 자동 종료된다. " +
+      "다만 계약기간 만료 전 '갑'이 동일한 근로조건으로 '을'에게 계약기간 연장에 대한 의사표시를 한 경우 본 근로계약으로 갈음할 수 있다.</p>" +
+      '<div class="contract-section-title">2. 임금</div>' +
+      "<p>월 포괄임금 <b>" + (typeof c.monthlyWageTotal === "number" ? fmt(c.monthlyWageTotal) + "원" : escapeHtml(c.monthlyWageTotal || "")) + "</b>" +
+        ' <button type="button" class="wage-detail-toggle" data-wage-toggle="1">임금 상세 계산 보기 ▾</button></p>' +
+      '<div class="wage-detail-wrap" id="wageDetailWrap" hidden><table class="stat-table"><tbody>' + wageRows + "</tbody></table></div>" +
+      "<p>'을'의 임금은 1일부터 말일까지 계산하여, 각종 제세공과금을 원천징수한 뒤 익월 20일에 지급한다. " +
+      "'을'의 임금은 '을' 명의의 계좌로 지급함을 원칙으로 한다. '을'은 포괄임금 및 임금의 계산방법 등에 대해 충분히 이해하고 동의한다.</p>" +
+      "<p>'을'이 결근·휴직·정직 등 귀책사유로 근로를 제공하지 못하는 경우 계약 월급액을 일할 계산하여 감액 지급하며, 중도 입·퇴사시에도 실 근무일수로 일할 계산하여 지급받는것에 동의한다. " +
+      "퇴사시 마지막달 임금·퇴직금·기타 금품은 정기 급여지급일까지 연장하여 지급받는것에 동의한다.</p>" +
+      '<div class="contract-section-title">3. 근로시간 및 휴게시간</div>' +
+      "<p>소정근로시간은 1일 8시간, 1주 40시간으로 하며, 근무시간 07:00~17:00, 휴게시간 12:00~13:00으로 한다. " +
+      "'을'은 매월 1주 12시간 한도로 연장근로를 하는데 동의한다.</p>" +
+      '<div class="contract-section-title">4. 시간외근로 및 수당</div>' +
+      "<p>현장과 협의되지 않은 조기출근 또는 업무 관련성이 확인되지 않은 출입기록자료는 근로시간에 포함되지 않으며, " +
+      "근로시간 산정 분쟁시 근로계약서상 시업·종업시간을 원칙으로 한다. 임금은 포괄일당을 1공수로 산정하되 현장여건에 따라 성과급을 추가공수형태로 지급할 수 있다.</p>" +
+      '<div class="contract-section-title">5. 휴일 및 연차휴가</div>' +
+      "<p>유급휴일은 주휴일, 근로자의 날(5.1), 관공서의 공휴일에 관한 규정에 따른 휴일로 정하며 토요일은 무급휴일로 한다. " +
+      "1주간 소정근로일수를 개근한 경우에 한하여 유급 주휴일을 부여한다. 연차유급휴가는 근로기준법 관련 규정에 따른다.</p>" +
+      '<div class="contract-section-title">6. 계약해지 및 퇴직</div>' +
+      "<p>'갑'은 '을'이 중대한 업무상 잘못, 무단결근(연속 3일·월 5일 이상), 근무태만, 정당한 업무지시 거부, 그 밖에 취업규칙·사회통념상 근로관계 유지가 곤란한 사유가 있을 경우 계약해지를 통보할 수 있다. " +
+      "'을'은 퇴사하려는 경우 퇴사일 30일 전까지 사직서를 제출해야 하며, 업무인수인계를 철저히 해야 한다. 퇴직금은 법정기준에 따라 지급하되 정기 급여지급일까지 연장하여 지급받는것에 동의한다.</p>" +
+      '<div class="contract-section-title">7. 손해배상 및 기타</div>' +
+      "<p>'을'이 본 계약내용을 위반하거나 고의·과실로 '갑'에게 손해를 발생시킨 경우 전액 배상 책임이 있다. " +
+      "본 근로계약서에 명시되지 않은 사항은 '갑'의 취업규칙과 노동관계법령에 따른다.</p>" +
+      '<div class="contract-section-title">8. 개인정보 제공 동의</div>' +
+      "<p>개인정보(주민등록번호, 주소, 급여 등)를 4대보험 업무관련 수행회사 및 관련기관에 제공하는데에 동의한다.</p>" +
+      "<p>본 근로계약서를 정히 교부받았음을 확인한다. (전자적 방법 포함)</p>" +
+      "<p class=\"contract-date-line\">" + escapeHtml(c.contractDateLine || "") + "</p>" +
+    "</div>";
+  }
+
+  // ---- 서명 패드 (마우스/터치 겸용) — 계약서·개인정보동의서 공통으로 재사용 ----
+  function wireSignaturePad(canvasId) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    var ratio = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, rect.width * ratio);
+    canvas.height = Math.max(1, rect.height * ratio);
+    var ctx = canvas.getContext && canvas.getContext("2d");
+    if (!ctx) return null; // 캔버스 2D 컨텍스트를 지원하지 않는 환경(구형 브라우저 등) 방어
+    ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#111827";
+    var drawing = false, hasDrawn = false, lastX = 0, lastY = 0;
+    function posFromEvent(e) {
+      var r = canvas.getBoundingClientRect();
+      var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+      var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+      return { x: cx - r.left, y: cy - r.top };
+    }
+    function start(e) { e.preventDefault(); drawing = true; var p = posFromEvent(e); lastX = p.x; lastY = p.y; }
+    function move(e) {
+      if (!drawing) return;
+      e.preventDefault();
+      var p = posFromEvent(e);
+      ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke();
+      lastX = p.x; lastY = p.y; hasDrawn = true;
+    }
+    function end(e) { drawing = false; }
+    canvas.addEventListener("mousedown", start);
+    canvas.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", end);
+    canvas.addEventListener("touchstart", start, { passive: false });
+    canvas.addEventListener("touchmove", move, { passive: false });
+    canvas.addEventListener("touchend", end);
+    return {
+      clear: function () { ctx.clearRect(0, 0, canvas.width, canvas.height); hasDrawn = false; },
+      isEmpty: function () { return !hasDrawn; },
+      toDataURL: function () { return canvas.toDataURL("image/png"); }
+    };
+  }
+
   function wireSettingsPage() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-settings-add]"), function (btn) {
       btn.addEventListener("click", function () {
@@ -3996,6 +4483,11 @@
       wireAuthGate();
       return;
     }
+    var gateAccount = currentAccount();
+    if (gateAccount && (!state.privacyConsents || !state.privacyConsents[gateAccount.workerId])) {
+      wirePrivacyConsentGate();
+      return;
+    }
 
     var logoutBtn = document.getElementById("btnLogout");
     if (logoutBtn) logoutBtn.addEventListener("click", function () {
@@ -4026,6 +4518,10 @@
       var matAccount = currentAccount();
       if (matAccount && matAccount.role === WAREHOUSE_ROLE) wireWarehouseMaterials();
       else wireLeadMaterials();
+      return;
+    }
+    if (currentInputTab === "contracts") {
+      wireContractSign();
       return;
     }
 
@@ -4675,6 +5171,7 @@
     wireSettingsPage();
     wireSitesPage();
     wireMaterialsPage();
+    wireContractsAdminPage();
     wireStoragePanel();
     var dashSiteFilterEl = document.getElementById("dashSiteFilter");
     if (dashSiteFilterEl) {
