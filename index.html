@@ -429,6 +429,9 @@
   .contract-date-line { text-align: center; margin-top: 18px; font-weight: 600; }
   .wage-detail-toggle { border: 1px solid var(--border); background: var(--surface); color: var(--accent); font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; cursor: pointer; margin-left: 4px; }
   .wage-detail-wrap { margin: 8px 0 4px; }
+  .consent-pdf-wrap { position: relative; margin: 10px 0 4px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; min-height: 120px; }
+  .consent-pdf-canvas { display: block; width: 100%; height: auto; }
+  .consent-pdf-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12.5px; color: var(--text-muted); background: var(--surface-2); }
   .consent-clause-box { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; margin: 10px 0 4px; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); max-height: 260px; overflow-y: auto; }
   .consent-clause-box p { margin: 0 0 12px; }
   .consent-clause-box p:last-child { margin-bottom: 0; }
@@ -1157,6 +1160,25 @@
       if (ok && window.JSZip) jszipLoaded = true; else jszipFailed = true;
       var cbs = jszipReadyCallbacks; jszipReadyCallbacks = [];
       cbs.forEach(function (f) { f(jszipLoaded); });
+    });
+  }
+  // 개인정보동의서 픽셀 오버레이용: 원본 PDF를 캔버스에 그대로 렌더링하기 위한 pdf.js 로더.
+  var pdfjsLoaded = false, pdfjsFailed = false, pdfjsLoading = false, pdfjsReadyCallbacks = [];
+  function ensurePdfJs(cb) {
+    if (pdfjsLoaded || pdfjsFailed) { cb(pdfjsLoaded); return; }
+    pdfjsReadyCallbacks.push(cb);
+    if (pdfjsLoading) return;
+    pdfjsLoading = true;
+    loadScriptSeq(["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"], function (ok) {
+      pdfjsLoading = false;
+      if (ok && window.pdfjsLib) {
+        try {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          pdfjsLoaded = true;
+        } catch (e) { pdfjsFailed = true; }
+      } else { pdfjsFailed = true; }
+      var cbs = pdfjsReadyCallbacks; pdfjsReadyCallbacks = [];
+      cbs.forEach(function (f) { f(pdfjsLoaded); });
     });
   }
 
@@ -2399,12 +2421,45 @@
   }
 
   // ---- 작업자 화면: 개인정보 수집·이용 동의서 (최초 입사시 1회) ----
+  // 원본 PDF(assets/privacy-consent-template.pdf)를 pdf.js로 캔버스에 그대로 그려서 배경으로 쓰고("색상조차 바뀌면 안됨"),
+  // 그 위에 입력값을 실제 빈칸 좌표(포인트 단위, PDF 페이지 기준 595x841)에 캔버스로 "스탬프"해서 최종 모습을 실시간 미리보기한다.
+  // 좌표는 pdfplumber로 원본 PDF의 글자/표 좌표를 직접 추출해서 얻은 값이라 눈대중이 아니라 정확하다.
+  // 인터넷/캐시 문제로 pdf.js 로딩이나 PDF 렌더링이 실패하면 기존 HTML 재현 버전으로 자동 폴백한다.
   var PRIVACY_ID_TYPES = [
     { key: "resident", label: "주민등록번호" },
     { key: "license", label: "운전면허번호" },
     { key: "passport", label: "여권번호" },
     { key: "foreigner", label: "외국인등록번호" }
   ];
+  var CONSENT_PDF_URL = "assets/privacy-consent-template.pdf";
+  var CONSENT_PDF_W = 595, CONSENT_PDF_H = 841; // 원본 PDF 페이지 크기(포인트)
+  var CONSENT_FIELDS = {
+    name:     { x0: 127, top: 93, x1: 249, bottom: 114 },
+    birth_y:  { x0: 327, top: 93, x1: 353, bottom: 114 },
+    birth_m:  { x0: 367, top: 93, x1: 383, bottom: 114 },
+    birth_d:  { x0: 397, top: 93, x1: 413, bottom: 114 },
+    gender_m: { x0: 507.4, top: 99.1, x1: 517.4, bottom: 109.1 },
+    gender_f: { x0: 532.5, top: 99.1, x1: 542.5, bottom: 109.1 },
+    idtype_label: {
+      resident:  { x0: 320, top: 585.4, x1: 400, bottom: 597.3 },
+      license:   { x0: 320, top: 597.3, x1: 400, bottom: 609.1 },
+      passport:  { x0: 320, top: 609.1, x1: 400, bottom: 620.9 },
+      foreigner: { x0: 320, top: 620.9, x1: 400, bottom: 632.7 }
+    },
+    idtype_value: {
+      resident:  { x0: 404, top: 585.4, x1: 542, bottom: 597.3 },
+      license:   { x0: 404, top: 597.3, x1: 542, bottom: 609.1 },
+      passport:  { x0: 404, top: 609.1, x1: 542, bottom: 620.9 },
+      foreigner: { x0: 404, top: 620.9, x1: 542, bottom: 632.7 }
+    },
+    date_y: { x0: 258, top: 682.1, x1: 276, bottom: 691.1 },
+    date_m: { x0: 289, top: 682.1, x1: 307, bottom: 691.1 },
+    date_d: { x0: 320, top: 682.1, x1: 339, bottom: 691.1 },
+    sig:    { x0: 392, top: 701, x1: 486, bottom: 720 }
+  };
+  var consentBaseCanvas = null; // pdf.js로 렌더링한, 손대지 않은 원본 페이지 캔버스(재스탬프할 때마다 여기서 다시 그림)
+  var consentSigImg = null; // 서명 dataURL을 미리 로드해둔 Image 캐시(리드로우마다 새로 로드하지 않도록)
+
   function buildPrivacyConsentGateHtml(st, account) {
     var idTypeOptsHtml = PRIVACY_ID_TYPES.map(function (t, idx) {
       return '<label class="remember-check" style="display:block;margin-bottom:6px"><input type="radio" name="consentIdType" value="' + t.key + '"' + (idx === 0 ? " checked" : "") + "> " + t.label + "</label>";
@@ -2412,16 +2467,12 @@
     return '<div class="phone-wrap"><div class="phone" style="max-width:460px">' +
       '<div class="phone-topbar"><div class="app-name">📝 개인정보 수집·이용 동의서</div><div class="app-sub">최초 입사시 1회만 작성하면 돼요</div></div>' +
       '<div class="phone-body">' +
-        '<div class="panel-caption" style="margin:0 0 14px">' + escapeHtml(account.name || account.workerId) + '님, 근로계약 체결을 위해 아래 개인정보 수집·이용·제공 및 보안서약에 동의해주세요.</div>' +
-        '<table class="contract-info-table" style="margin-bottom:14px">' +
-          "<tr><th>성명</th><td>" + escapeHtml(account.name || account.workerId) + "</td></tr>" +
-        "</table>" +
-        '<div class="field"><label>생년월일</label><input type="text" id="consentBirthdate" placeholder="예: 900101"></div>' +
-        '<div class="field"><label>성별</label>' +
-          '<label class="remember-check" style="display:inline-block;margin-right:16px"><input type="radio" name="consentGender" value="남" checked> 남</label>' +
-          '<label class="remember-check" style="display:inline-block"><input type="radio" name="consentGender" value="여"> 여</label>' +
+        '<div class="panel-caption" style="margin:0 0 14px">' + escapeHtml(account.name || account.workerId) + '님, 근로계약 체결을 위해 아래 개인정보 수집·이용·제공 및 보안서약에 동의해주세요. 원본 서식 그대로 미리보기가 표시돼요.</div>' +
+        '<div class="consent-pdf-wrap" id="consentPdfWrap">' +
+          '<canvas id="consentPdfCanvas" class="consent-pdf-canvas"></canvas>' +
+          '<div class="consent-pdf-loading" id="consentPdfLoading">원본 문서를 불러오는 중…</div>' +
         "</div>" +
-        '<div class="consent-clause-box">' +
+        '<div class="consent-clause-box" id="consentPdfFallback" hidden>' +
           '<p><b>1. 수집·이용에 관한 사항</b><br>목적: 직원 채용(근로계약) 및 사무소 운영에 필요한 필수 정보 수집.<br>' +
           '항목: 성명, 주민번호, 주소, 연락처, 전자메일 등 개인식별정보.<br>' +
           '보유기간: 퇴사 등 근로계약 종료·해지일까지(단, 근로기준법·4대보험 관련 필수정보는 관련 법령상 보존기간까지 보관).<br>' +
@@ -2433,6 +2484,15 @@
           '※ 위 제공 동의 역시 근로계약 체결을 위해 필수이며, 거부시 채용에 제한이 있을 수 있습니다.</p>' +
           '<p><b>3. 보안서약서</b><br>본인은 업무 수행 중 취득한 고객의 개인정보를 보호하고 회사 영업비밀 보호 의무를 준수하며, ' +
           '위반하거나 고의·과실로 피해가 발생한 경우 손해배상 등 모든 법적 책임이 본인에게 있음을 서약합니다.</p>' +
+          '<div class="panel-caption" style="margin-top:6px">⚠ 원본 서식을 불러오지 못해 텍스트로 대신 보여드려요. 내용은 동일해요.</div>' +
+        "</div>" +
+        '<table class="contract-info-table" style="margin:14px 0">' +
+          "<tr><th>성명</th><td>" + escapeHtml(account.name || account.workerId) + "</td></tr>" +
+        "</table>" +
+        '<div class="field"><label>생년월일 (6자리, 예: 900101)</label><input type="text" id="consentBirthdate" placeholder="예: 900101" maxlength="6"></div>' +
+        '<div class="field"><label>성별</label>' +
+          '<label class="remember-check" style="display:inline-block;margin-right:16px"><input type="radio" name="consentGender" value="남" checked> 남</label>' +
+          '<label class="remember-check" style="display:inline-block"><input type="radio" name="consentGender" value="여"> 여</label>' +
         "</div>" +
         '<div class="field"><label>4. 고유식별정보 종류 (해당하는 것 1개만 선택)</label>' + idTypeOptsHtml + "</div>" +
         '<div class="field"><label id="consentIdNumberLabel">주민등록번호</label><input type="text" id="consentIdNumber" placeholder="번호를 입력하세요"></div>' +
@@ -2440,7 +2500,7 @@
           '<label class="remember-check"><input type="checkbox" id="consentConfirmRead"> 개인정보 수집·이용·제공 및 보안서약 내용에 모두 동의합니다</label>' +
         "</div>" +
         '<div class="contract-sig-section" id="consentSigSection" hidden>' +
-          '<div class="contract-sig-label">동의인 서명</div>' +
+          '<div class="contract-sig-label">동의인 서명 (문서의 서명란에 실시간으로 반영돼요)</div>' +
           '<canvas id="consentSigCanvas" class="sig-pad"></canvas>' +
           '<div class="sig-pad-actions"><button type="button" class="btn-secondary" id="consentSigClear">다시 서명</button></div>' +
         "</div>" +
@@ -2448,14 +2508,130 @@
       "</div>" +
     "</div></div>";
   }
+
+  function consentRedrawCanvas() {
+    var canvas = document.getElementById("consentPdfCanvas");
+    if (!canvas || !consentBaseCanvas) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    var scale = canvas.width / CONSENT_PDF_W;
+    ctx.drawImage(consentBaseCanvas, 0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#1447e6";
+    ctx.strokeStyle = "#1447e6";
+
+    function box(f) { return { x0: f.x0 * scale, top: f.top * scale, x1: f.x1 * scale, bottom: f.bottom * scale }; }
+    function stamp(text, f, opts) {
+      if (!text) return;
+      opts = opts || {};
+      var b = box(f);
+      var fontSize = Math.max(7, (b.bottom - b.top) * (opts.sizeRatio || 0.62));
+      ctx.font = (opts.bold ? "bold " : "") + fontSize + 'px "Malgun Gothic","Apple SD Gothic Neo",sans-serif';
+      ctx.textAlign = opts.align || "left";
+      var x = opts.align === "center" ? (b.x0 + b.x1) / 2 : b.x0 + 3;
+      var y = b.bottom - fontSize * 0.26;
+      ctx.fillText(text, x, y);
+    }
+    function checkIn(f) {
+      var b = box(f);
+      var fontSize = (b.bottom - b.top) * 0.95;
+      ctx.font = "bold " + fontSize + "px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("✓", (b.x0 + b.x1) / 2, b.bottom - fontSize * 0.12);
+    }
+    function highlightRow(f) {
+      var b = box(f);
+      ctx.save();
+      ctx.fillStyle = "rgba(20,71,230,0.14)";
+      ctx.fillRect(b.x0, b.top, b.x1 - b.x0, b.bottom - b.top);
+      ctx.restore();
+      ctx.fillStyle = "#1447e6";
+    }
+
+    var nameEl = document.getElementById("consentIdNumberLabel"); // unused placeholder guard, real name comes from account
+    var account = currentAccount();
+    stamp(account ? (account.name || account.workerId) : "", CONSENT_FIELDS.name, { align: "center" });
+
+    var bd = ((document.getElementById("consentBirthdate") || {}).value || "").replace(/[^0-9]/g, "");
+    if (bd.length >= 2) stamp(bd.slice(0, 2), CONSENT_FIELDS.birth_y, { align: "center" });
+    if (bd.length >= 4) stamp(bd.slice(2, 4), CONSENT_FIELDS.birth_m, { align: "center" });
+    if (bd.length >= 6) stamp(bd.slice(4, 6), CONSENT_FIELDS.birth_d, { align: "center" });
+
+    var genderEl = document.querySelector('input[name="consentGender"]:checked');
+    if (genderEl && genderEl.value === "남") checkIn(CONSENT_FIELDS.gender_m);
+    else if (genderEl && genderEl.value === "여") checkIn(CONSENT_FIELDS.gender_f);
+
+    var idTypeEl = document.querySelector('input[name="consentIdType"]:checked');
+    var idType = idTypeEl ? idTypeEl.value : "resident";
+    if (CONSENT_FIELDS.idtype_label[idType]) highlightRow(CONSENT_FIELDS.idtype_label[idType]);
+    var idNum = (document.getElementById("consentIdNumber") || {}).value || "";
+    if (CONSENT_FIELDS.idtype_value[idType]) stamp(idNum, CONSENT_FIELDS.idtype_value[idType], {});
+
+    var today = new Date();
+    var yy = String(today.getFullYear()).slice(2);
+    stamp(yy, CONSENT_FIELDS.date_y, { align: "center" });
+    stamp(String(today.getMonth() + 1), CONSENT_FIELDS.date_m, { align: "center" });
+    stamp(String(today.getDate()), CONSENT_FIELDS.date_d, { align: "center" });
+
+    if (consentSigImg) {
+      var b = box(CONSENT_FIELDS.sig);
+      var ratio = Math.min((b.x1 - b.x0) / consentSigImg.width, (b.bottom - b.top) / consentSigImg.height);
+      var dw = consentSigImg.width * ratio, dh = consentSigImg.height * ratio;
+      ctx.drawImage(consentSigImg, b.x0, b.bottom - dh, dw, dh);
+    }
+  }
+
+  function consentLoadPdf() {
+    var loadingEl = document.getElementById("consentPdfLoading");
+    function fallback() {
+      var wrap = document.getElementById("consentPdfWrap");
+      var fb = document.getElementById("consentPdfFallback");
+      if (wrap) wrap.hidden = true;
+      if (fb) fb.hidden = false;
+    }
+    ensurePdfJs(function (ok) {
+      if (!ok || !window.pdfjsLib) { fallback(); return; }
+      window.pdfjsLib.getDocument(CONSENT_PDF_URL).promise.then(function (pdf) {
+        return pdf.getPage(1);
+      }).then(function (page) {
+        var canvas = document.getElementById("consentPdfCanvas");
+        if (!canvas) return;
+        var viewport = page.getViewport({ scale: 2 });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        var base = document.createElement("canvas");
+        base.width = viewport.width;
+        base.height = viewport.height;
+        var baseCtx = base.getContext("2d");
+        return page.render({ canvasContext: baseCtx, viewport: viewport }).promise.then(function () {
+          consentBaseCanvas = base;
+          if (loadingEl) loadingEl.hidden = true;
+          consentRedrawCanvas();
+        });
+      }).catch(function () { fallback(); });
+    });
+  }
+
   function wirePrivacyConsentGate() {
+    consentBaseCanvas = null;
+    consentSigImg = null;
+    consentLoadPdf();
+
     var idNumberLabel = document.getElementById("consentIdNumberLabel");
     Array.prototype.forEach.call(document.querySelectorAll('input[name="consentIdType"]'), function (radio) {
       radio.addEventListener("change", function () {
         var t = PRIVACY_ID_TYPES.filter(function (x) { return x.key === radio.value; })[0];
         if (idNumberLabel && t) idNumberLabel.textContent = t.label;
+        consentRedrawCanvas();
       });
     });
+    var birthdateEl = document.getElementById("consentBirthdate");
+    if (birthdateEl) birthdateEl.addEventListener("input", consentRedrawCanvas);
+    var idNumberEl = document.getElementById("consentIdNumber");
+    if (idNumberEl) idNumberEl.addEventListener("input", consentRedrawCanvas);
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="consentGender"]'), function (radio) {
+      radio.addEventListener("change", consentRedrawCanvas);
+    });
+
     var confirmChk = document.getElementById("consentConfirmRead");
     var sigSection = document.getElementById("consentSigSection");
     var signBtn = document.getElementById("btnConsentSign");
@@ -2464,16 +2640,27 @@
     function refreshSignEnabled() {
       signBtn.disabled = !confirmChk.checked || !sigPad || sigPad.isEmpty();
     }
+    function refreshSigPreview() {
+      if (!sigPad || sigPad.isEmpty()) { consentSigImg = null; consentRedrawCanvas(); return; }
+      var img = new Image();
+      img.onload = function () { consentSigImg = img; consentRedrawCanvas(); };
+      img.src = sigPad.toDataURL();
+    }
     confirmChk.addEventListener("change", function () {
       if (sigSection) sigSection.hidden = !confirmChk.checked;
       refreshSignEnabled();
     });
     if (sigSection) {
-      sigSection.addEventListener("mouseup", refreshSignEnabled);
-      sigSection.addEventListener("touchend", refreshSignEnabled);
+      sigSection.addEventListener("mouseup", function () { refreshSignEnabled(); refreshSigPreview(); });
+      sigSection.addEventListener("touchend", function () { refreshSignEnabled(); refreshSigPreview(); });
     }
     var clearBtn = document.getElementById("consentSigClear");
-    if (clearBtn) clearBtn.addEventListener("click", function () { if (sigPad) sigPad.clear(); refreshSignEnabled(); });
+    if (clearBtn) clearBtn.addEventListener("click", function () {
+      if (sigPad) sigPad.clear();
+      consentSigImg = null;
+      consentRedrawCanvas();
+      refreshSignEnabled();
+    });
     signBtn.addEventListener("click", function () {
       if (!sigPad || sigPad.isEmpty()) { showToast("서명을 해주세요"); return; }
       var account = currentAccount();
