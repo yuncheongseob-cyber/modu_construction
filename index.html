@@ -894,7 +894,7 @@
   if (!state.materialTx) state.materialTx = []; // {id, siteId, type:"receive"|"distribute"|"use", name, spec, qty, team, poId, note, workerId, createdAt}
   if (!state.materialRequests) state.materialRequests = []; // {id, siteId, team, name, spec, qty, note, status:"대기"|"충족"|"발주요청"|"발주완료", vendor, expectedDate, requestedBy, createdAt, orderRequestedAt, resolvedAt}
   // 근로계약서 전자서명: 관리자가 엑셀(워커별 시트)을 업로드하면 전화번호로 작업자 계정과 매칭해서 한 건씩 생성한다.
-  if (!state.laborContracts) state.laborContracts = []; // {id, workerId, phone, name, type:"monthly", contract:{...엑셀에서 뽑은 필드}, status:"대기서명"|"서명완료", signatureDataUrl, signedAt, uploadedAt}
+  if (!state.laborContracts) state.laborContracts = []; // {id, workerId, phone, name, type:"monthly"|"daily", contract:{...엑셀에서 뽑은 필드}, status:"대기서명"|"서명완료", signatureDataUrl, signedAt, uploadedAt, bankConfirmStatus:"confirmed"|"pending_correction"|null(daily만 사용), bankCorrectionRequest}
   // 개인정보 수집·이용 동의서: 최초 입사(가입) 시 1회만 받는다. workerId 기준 1건.
   // 이 기능이 처음 배포되는 시점에 이미 가입돼 있던 작업자들은 소급으로 받지 않기로 했으므로,
   // privacyConsents 자체가 아직 없던 상태(=이 기능 이전 데이터)라면 기존 계정은 전부 "예외"로 간주해서 게이트에 막히지 않게 한다.
@@ -2373,9 +2373,32 @@
         '<div class="table-wrap"><table><thead><tr><th>계약기간</th><th>서명일시</th><th></th></tr></thead><tbody>' + rowsHtml + "</tbody></table></div>" +
       "</div>";
     }
+    // 일용직 계약서는 계좌번호가 임금 지급과 직결되는 문제라, 본문을 다 읽기 전에 "이 계좌가 본인 계좌가 맞는지" 먼저 확인받는다.
+    if (pending.type === "daily" && pending.bankConfirmStatus === "pending_correction") {
+      return emptyPanel("계좌정보 확인중", "정정 요청을 접수했어요. 관리자가 확인 후 다시 계좌 확인을 요청드릴게요.");
+    }
+    if (pending.type === "daily" && pending.bankConfirmStatus !== "confirmed") {
+      return '<div class="panel"><h2 style="margin:0 0 4px">계좌정보 확인</h2>' +
+        '<div class="panel-caption" style="margin:0 0 14px">근로계약서에 기재될 급여 지급 계좌예요. 본인 계좌가 맞는지 확인해주세요.</div>' +
+        '<table class="contract-info-table" style="margin-bottom:16px">' +
+          "<tr><th>은행</th><td>" + escapeHtml(pending.contract.bankName || "") + " 은행</td></tr>" +
+          "<tr><th>계좌번호</th><td>" + escapeHtml(pending.contract.bankAccountNumber || "") + "</td></tr>" +
+        "</table>" +
+        '<div class="modal-actions" style="justify-content:flex-start">' +
+          '<button type="button" class="submit-btn" id="btnBankConfirmYes" style="max-width:200px" data-contract-id="' + pending.id + '">예, 맞습니다</button>' +
+          '<button type="button" class="btn-secondary" id="btnBankConfirmNo" data-contract-id="' + pending.id + '">아니요, 다릅니다</button>' +
+        "</div>" +
+        '<div class="contract-sig-section" id="bankCorrectionSection" hidden>' +
+          '<div class="contract-sig-label">올바른 계좌정보를 알려주세요</div>' +
+          '<div class="field"><label>은행명</label><input type="text" id="bankCorrectionBankName" placeholder="예: 국민"></div>' +
+          '<div class="field" style="margin-top:8px"><label>계좌번호</label><input type="text" id="bankCorrectionAccountNumber" placeholder="예: 123456-78-901234"></div>' +
+          '<button type="button" class="submit-btn" id="btnBankCorrectionSubmit" style="margin-top:10px" data-contract-id="' + pending.id + '">정정 요청 보내기</button>' +
+        "</div>" +
+      "</div>";
+    }
     return '<div class="panel"><h2 style="margin:0 0 4px">근로계약서 확인 및 서명</h2>' +
       '<div class="panel-caption" style="margin:0 0 14px">아래 내용을 끝까지 확인한 뒤, 맨 아래에서 서명해주세요.</div>' +
-      buildMonthlyContractBodyHtml(pending.contract) +
+      buildContractBodyHtml(pending.type, pending.contract) +
       '<div class="contract-confirm-box">' +
         '<label class="remember-check"><input type="checkbox" id="contractConfirmRead"> 위 계약 내용을 모두 확인했습니다</label>' +
       "</div>" +
@@ -2399,6 +2422,32 @@
         var row = (state.laborContracts || []).filter(function (r) { return r.id === id; })[0];
         if (row) openContractViewModal(row);
       });
+    });
+    var bankYesBtn = document.getElementById("btnBankConfirmYes");
+    var bankNoBtn = document.getElementById("btnBankConfirmNo");
+    var bankCorrectionSection = document.getElementById("bankCorrectionSection");
+    if (bankYesBtn) bankYesBtn.addEventListener("click", function () {
+      var id = bankYesBtn.getAttribute("data-contract-id");
+      var row = (state.laborContracts || []).filter(function (r) { return r.id === id; })[0];
+      if (!row) return;
+      row.bankConfirmStatus = "confirmed";
+      persist(function (ok) { if (ok) renderInputView(); });
+    });
+    if (bankNoBtn) bankNoBtn.addEventListener("click", function () {
+      if (bankCorrectionSection) bankCorrectionSection.hidden = false;
+    });
+    var bankCorrectionSubmit = document.getElementById("btnBankCorrectionSubmit");
+    if (bankCorrectionSubmit) bankCorrectionSubmit.addEventListener("click", function () {
+      var id = bankCorrectionSubmit.getAttribute("data-contract-id");
+      var row = (state.laborContracts || []).filter(function (r) { return r.id === id; })[0];
+      if (!row) return;
+      var bankName = (document.getElementById("bankCorrectionBankName") || {}).value || "";
+      var accountNumber = (document.getElementById("bankCorrectionAccountNumber") || {}).value || "";
+      bankName = bankName.trim(); accountNumber = accountNumber.trim();
+      if (!bankName || !accountNumber) { showToast("은행명과 계좌번호를 입력해주세요"); return; }
+      row.bankConfirmStatus = "pending_correction";
+      row.bankCorrectionRequest = { bankName: bankName, accountNumber: accountNumber, requestedAt: Date.now() };
+      persist(function (ok) { if (ok) { showToast("정정 요청을 보냈어요. 관리자 확인 후 다시 안내드릴게요"); renderInputView(); } });
     });
     var confirmChk = document.getElementById("contractConfirmRead");
     var sigSection = document.getElementById("contractSigSection");
@@ -4347,7 +4396,40 @@
     return found.length ? accounts[found[0]] : null;
   }
 
+  // 일용직(1주 40시간) 근로계약서 양식 셀 좌표. 박남원팀/서창우팀/유도원 3개 팀, 총 7명 워커 시트를 대조해 확인함.
+  var DAILY_CONTRACT_CELLS = {
+    company: "H3", siteName: "S3", name: "H4", residentNum: "S4",
+    address: "H5", phone: "V5", contractStart: "H8", contractEnd: "P8",
+    dailyWage: "P18", wageHourly: "D20", wageBase: "H20", wageWeekly: "L20",
+    wageOvertime: "P20", wageAnnual: "T20", wageHoliday: "X20",
+    bankInfoRaw: "D32", contractDateLine: "A71"
+  };
+  // D32 예시: '2. "을"의 본인계좌 지정하여 통보한 온라인통장구좌 (  9002-1345-9699-7   , 새마을금고  은행)로 지급한다.'
+  // 계좌번호/은행명이 자유 텍스트 안에 박혀있어서 정규식으로 뽑아낸다. (팀 3곳 7명 전부 같은 패턴 확인함)
+  function parseBankInfoFromText(raw) {
+    var m = (raw || "").toString().match(/\(([^,]+),\s*([^,]+?)\s*은행\)/);
+    if (!m) return { accountNumber: "", bankName: "" };
+    return { accountNumber: m[1].replace(/\s+/g, ""), bankName: m[2].replace(/\s+/g, "") };
+  }
+  function parseDailyContractSheet(sheetName, ws) {
+    var name = (cellVal(ws, DAILY_CONTRACT_CELLS.name) || "").toString().replace(/\s+/g, "");
+    var residentNum = cellVal(ws, DAILY_CONTRACT_CELLS.residentNum);
+    if (!name || !residentNum) return null;
+    var c = {};
+    Object.keys(DAILY_CONTRACT_CELLS).forEach(function (k) { c[k] = cellVal(ws, DAILY_CONTRACT_CELLS[k]); });
+    c.sheetName = sheetName;
+    c.name = name;
+    var bank = parseBankInfoFromText(c.bankInfoRaw);
+    c.bankAccountNumber = bank.accountNumber;
+    c.bankName = bank.bankName;
+    return c;
+  }
+  function parseContractSheet(contractType, sheetName, ws) {
+    return contractType === "daily" ? parseDailyContractSheet(sheetName, ws) : parseMonthlyContractSheet(sheetName, ws);
+  }
+
   var contractUploadPreview = null; // [{sheetName, contract, account}] — 업로드 직후 매칭 결과를 확정 발송 전까지 보여준다.
+  var contractUploadType = "monthly"; // "monthly" | "daily" — 업로드 시 선택한 계약서 종류
   var contractsPageCurrent = 1;
   var contractsPageSize = 10;
 
@@ -4376,18 +4458,27 @@
     if (contractsPageCurrent < 1) contractsPageCurrent = 1;
     var contractsPageList = list.slice((contractsPageCurrent - 1) * contractsPageSize, contractsPageCurrent * contractsPageSize);
     var statusRows = list.length ? contractsPageList.map(function (row) {
-      var statusHtml = row.status === "서명완료"
+      var statusHtml = row.bankConfirmStatus === "pending_correction"
+        ? '<span class="settings-tag" style="color:var(--bad)">⚠ 계좌정보 확인요청</span>'
+        : row.status === "서명완료"
         ? '<span class="settings-tag" style="color:var(--good)">✓ 서명완료</span>'
         : '<span class="settings-tag" style="color:var(--accent)">대기중</span>';
-      var actionsHtml = row.status === "서명완료"
+      var actionsHtml = row.bankConfirmStatus === "pending_correction"
+        ? '<button type="button" class="account-bar-btn" data-contract-bank-review="' + row.id + '">계좌정보 확인</button>'
+        : row.status === "서명완료"
         ? '<button type="button" class="account-bar-btn" data-contract-view="' + row.id + '">보기</button>'
         : '<button type="button" class="account-bar-btn" data-contract-cancel="' + row.id + '">발송취소</button>';
-      return '<tr><td>' + escapeHtml(row.contract.name) + "</td><td>" + escapeHtml(row.contract.phone || "") + "</td><td>" + escapeHtml(row.contract.contractStart || "") + " ~ " + escapeHtml(row.contract.contractEnd || "") + "</td><td>" + statusHtml + "</td><td>" + actionsHtml + "</td></tr>";
+      var typeTag = row.type === "daily" ? '<span class="settings-tag" style="margin-left:6px">일용직</span>' : "";
+      return '<tr><td>' + escapeHtml(row.contract.name) + typeTag + "</td><td>" + escapeHtml(row.contract.phone || "") + "</td><td>" + escapeHtml(row.contract.contractStart || "") + " ~ " + escapeHtml(row.contract.contractEnd || "") + "</td><td>" + statusHtml + "</td><td>" + actionsHtml + "</td></tr>";
     }).join("") : '<tr><td colspan="5" class="empty-state">아직 발송한 계약서가 없어요</td></tr>';
 
     return '<div class="panel-caption" style="margin:-4px 0 14px">✍️ 근로계약서 엑셀(워커별 시트)을 올리면 전화번호로 작업자 계정을 찾아 서명 요청을 보내요.</div>' +
       '<div class="panel"><h2 style="margin:0 0 10px">계약서 엑셀 업로드</h2>' +
-        '<div class="panel-caption" style="margin:0 0 10px">월정직(관리자) 양식 기준이에요. 첫 시트(빈 템플릿)는 자동으로 건너뛰어요.</div>' +
+        '<div class="panel-caption" style="margin:0 0 10px">첫 시트(빈 템플릿)는 자동으로 건너뛰어요.</div>' +
+        '<div class="field" style="max-width:260px;margin-bottom:10px"><label>계약서 종류</label><select id="contractTypeSelect">' +
+          '<option value="monthly"' + (contractUploadType === "monthly" ? " selected" : "") + '>월정직 (관리자) 근로계약서</option>' +
+          '<option value="daily"' + (contractUploadType === "daily" ? " selected" : "") + '>일용직 (1주 40시간) 근로계약서</option>' +
+        "</select></div>" +
         '<label class="account-bar-btn" for="contractFileInput" style="cursor:pointer;display:inline-block">📎 엑셀 파일 선택</label>' +
         '<input type="file" id="contractFileInput" accept=".xlsx,.xls" style="display:none">' +
         '<span id="contractFileStatus" style="margin-left:10px;color:var(--text-muted);font-size:12.5px"></span>' +
@@ -4400,11 +4491,14 @@
   }
 
   function wireContractsAdminPage() {
+    var typeSelect = document.getElementById("contractTypeSelect");
+    if (typeSelect) typeSelect.addEventListener("change", function () { contractUploadType = this.value; });
     var fileInput = document.getElementById("contractFileInput");
     if (fileInput) fileInput.addEventListener("change", function () {
       var file = this.files && this.files[0];
       this.value = "";
       if (!file) return;
+      var uploadType = contractUploadType;
       var statusEl = document.getElementById("contractFileStatus");
       if (statusEl) statusEl.textContent = "읽는 중…";
       ensureXlsx(function (ok) {
@@ -4417,10 +4511,10 @@
             var rows = [];
             wb.SheetNames.forEach(function (sn) {
               var ws = wb.Sheets[sn];
-              var contract = parseMonthlyContractSheet(sn, ws);
+              var contract = parseContractSheet(uploadType, sn, ws);
               if (!contract) return; // 빈 템플릿 시트 등은 건너뜀
               var account = findAccountByPhone(state, contract.phone);
-              rows.push({ sheetName: sn, contract: contract, account: account });
+              rows.push({ sheetName: sn, contract: contract, account: account, contractType: uploadType });
             });
             if (!rows.length) { showToast("워커별 시트를 찾지 못했어요. 양식을 확인해주세요"); return; }
             contractUploadPreview = rows;
@@ -4440,10 +4534,13 @@
         var existing = (state.laborContracts || []).filter(function (r) { return r.workerId === row.account.workerId && r.status === "대기서명"; })[0];
         if (existing) {
           existing.contract = row.contract;
+          existing.type = row.contractType;
+          existing.bankConfirmStatus = null;
+          existing.bankCorrectionRequest = null;
           existing.uploadedAt = Date.now();
         } else {
           state.laborContracts.push({
-            id: uid(), workerId: row.account.workerId, phone: row.contract.phone, type: "monthly",
+            id: uid(), workerId: row.account.workerId, phone: row.contract.phone, type: row.contractType,
             contract: row.contract, status: "대기서명", uploadedAt: Date.now()
           });
         }
@@ -4467,6 +4564,53 @@
         if (row) openContractViewModal(row);
       });
     });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-contract-bank-review]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-contract-bank-review");
+        var row = (state.laborContracts || []).filter(function (r) { return r.id === id; })[0];
+        if (row) openContractBankReviewModal(row);
+      });
+    });
+  }
+
+  // 작업자가 "계좌가 다릅니다"라고 정정 요청한 건을 관리자가 확인하고 반영하는 모달.
+  // 반영하면 계좌정보 확인 게이트를 다시 띄워서(bankConfirmStatus 초기화) 작업자가 새 정보로 다시 확인하게 한다.
+  function openContractBankReviewModal(row) {
+    var existing = document.getElementById("contractBankReviewOverlay");
+    if (existing) existing.parentNode.removeChild(existing);
+    var req = row.bankCorrectionRequest || {};
+    var overlay = document.createElement("div");
+    overlay.id = "contractBankReviewOverlay";
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card" style="max-width:480px">' +
+      '<h3 style="margin:0 0 10px">' + escapeHtml(row.contract.name) + ' 계좌정보 확인요청</h3>' +
+      '<div class="panel-caption" style="margin:0 0 10px">엑셀에 있던 계좌정보와 다르다고 작업자가 알려왔어요. 아래 내용을 확인하고 올바른 정보로 반영해주세요.</div>' +
+      '<table class="contract-info-table" style="margin-bottom:12px">' +
+        "<tr><th>엑셀 원본</th><td>" + escapeHtml(row.contract.bankName || "") + " " + escapeHtml(row.contract.bankAccountNumber || "") + "</td></tr>" +
+        "<tr><th>작업자 요청</th><td>" + escapeHtml(req.bankName || "") + " " + escapeHtml(req.accountNumber || "") + "</td></tr>" +
+        (req.note ? "<tr><th>메모</th><td>" + escapeHtml(req.note) + "</td></tr>" : "") +
+      "</table>" +
+      '<div class="field"><label>은행명</label><input type="text" id="bankReviewBankName" value="' + escapeHtml(req.bankName || row.contract.bankName || "") + '"></div>' +
+      '<div class="field" style="margin-top:8px"><label>계좌번호</label><input type="text" id="bankReviewAccountNumber" value="' + escapeHtml(req.accountNumber || row.contract.bankAccountNumber || "") + '"></div>' +
+      '<div class="modal-actions">' +
+        '<button type="button" class="submit-btn" id="bankReviewApply" style="max-width:220px">반영하고 재확인 요청</button>' +
+        '<button type="button" class="btn-secondary" id="bankReviewClose">닫기</button>' +
+      "</div>" +
+    "</div>";
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", function (ev) { if (ev.target === overlay) overlay.parentNode.removeChild(overlay); });
+    document.getElementById("bankReviewClose").addEventListener("click", function () { overlay.parentNode.removeChild(overlay); });
+    document.getElementById("bankReviewApply").addEventListener("click", function () {
+      var bankName = document.getElementById("bankReviewBankName").value.trim();
+      var accountNumber = document.getElementById("bankReviewAccountNumber").value.trim();
+      if (!bankName || !accountNumber) { showToast("은행명과 계좌번호를 입력해주세요"); return; }
+      row.contract.bankName = bankName;
+      row.contract.bankAccountNumber = accountNumber;
+      row.bankConfirmStatus = null;
+      row.bankCorrectionRequest = null;
+      overlay.parentNode.removeChild(overlay);
+      persist(function (ok) { if (ok) { showToast("반영했어요. 작업자에게 다시 계좌 확인 요청이 안내돼요"); renderDashView(); } });
+    });
   }
 
   function openContractViewModal(row) {
@@ -4477,7 +4621,7 @@
     overlay.className = "modal-overlay";
     overlay.innerHTML = '<div class="modal-card" style="max-width:640px;max-height:88vh">' +
       '<h3 style="margin:0 0 10px">' + escapeHtml(row.contract.name) + ' 근로계약서</h3>' +
-      buildMonthlyContractBodyHtml(row.contract) +
+      buildContractBodyHtml(row.type, row.contract) +
       (row.signatureDataUrl ? '<div class="contract-sig-block"><div class="contract-sig-label">서명 (' + escapeHtml(fmtDateTime(row.signedAt)) + ')</div><img src="' + row.signatureDataUrl + '" class="contract-sig-img"></div>' : "") +
       '<div class="modal-actions"><button type="button" class="btn-secondary" id="contractViewClose">닫기</button></div>' +
     "</div>";
@@ -4552,6 +4696,49 @@
       "<p>본 근로계약서를 정히 교부받았음을 확인한다. (전자적 방법 포함)</p>" +
       "<p class=\"contract-date-line\">" + escapeHtml(c.contractDateLine || "") + "</p>" +
     "</div>";
+  }
+
+  // 일용직(1주 40시간) 계약서 본문. 월정직과 조항 구성이 달라서(포괄일당·계좌 지급 조항 등) 별도 템플릿으로 둔다.
+  function buildDailyContractBodyHtml(c) {
+    var wageRows = [
+      ["시급", c.wageHourly], ["기본급", c.wageBase], ["주휴수당", c.wageWeekly],
+      ["시간외근로수당", c.wageOvertime], ["연차수당", c.wageAnnual], ["유급휴일수당", c.wageHoliday]
+    ].map(function (r) {
+      return '<tr><td>' + r[0] + "</td><td class=\"num\">" + (typeof r[1] === "number" ? fmt(r[1]) + "원" : escapeHtml(r[1] || "")) + "</td></tr>";
+    }).join("");
+    return '<div class="contract-read">' +
+      '<div class="contract-title">근 로 계 약 서 (일용직)</div>' +
+      '<table class="contract-info-table">' +
+        "<tr><th>사용자(갑)</th><td>" + escapeHtml(c.company || "") + "</td><th>현장명</th><td>" + escapeHtml(c.siteName || "") + "</td></tr>" +
+        "<tr><th>근로자(을)</th><td>" + escapeHtml(c.name || "") + "</td><th>생년월일</th><td>" + escapeHtml((c.residentNum || "").toString().slice(0, 6)) + "</td></tr>" +
+        "<tr><th>주소</th><td colspan=\"3\">" + escapeHtml(c.address || "") + "</td></tr>" +
+        "<tr><th>연락처</th><td colspan=\"3\">" + escapeHtml(c.phone || "") + "</td></tr>" +
+      "</table>" +
+      '<p>"갑"과 "을"은 아래의 근로조건을 상호간에 성실히 이행할 것을 약정한다.</p>' +
+      '<div class="contract-section-title">1. 근로계약기간</div>' +
+      "<p>" + escapeHtml(c.contractStart || "") + " ~ " + escapeHtml(c.contractEnd || "") + " 으로 한다. 1주 40시간, 일용(단기)근로로 계약기간의 만료로 자동 종료된다.</p>" +
+      '<div class="contract-section-title">2. 임금</div>' +
+      "<p>1. 포괄일당 <b>" + (typeof c.dailyWage === "number" ? fmt(c.dailyWage) + "원" : escapeHtml(c.dailyWage || "")) + "</b>" +
+        ' <button type="button" class="wage-detail-toggle" data-wage-toggle="1">임금 상세 계산 보기 ▾</button></p>' +
+      '<div class="wage-detail-wrap" id="wageDetailWrap" hidden><table class="stat-table"><tbody>' + wageRows + "</tbody></table></div>" +
+      "<p>2. \"을\"의 본인계좌 지정하여 통보한 온라인통장구좌 (<b>" + escapeHtml(c.bankAccountNumber || "") + "</b>, <b>" + escapeHtml(c.bankName || "") + " 은행</b>)로 지급한다. " +
+      "각종 제세공과금을 원천징수한 뒤 익월 20일에 지급하며, '을'은 포괄임금 및 임금의 계산방법 등에 대해 충분히 이해하고 동의한다.</p>" +
+      '<div class="contract-section-title">3. 근로시간 및 휴게시간</div>' +
+      "<p>소정근로시간은 1일 8시간, 1주 40시간으로 하며, 근무시간 07:00~17:00, 휴게시간 12:00~13:00으로 한다.</p>" +
+      '<div class="contract-section-title">4. 휴일 및 연차휴가</div>' +
+      "<p>유급휴일은 주휴일, 근로자의 날(5.1), 관공서의 공휴일에 관한 규정에 따른 휴일로 정하며 토요일은 무급휴일로 한다. " +
+      "1주간 소정근로일수를 개근한 경우에 한하여 유급 주휴일을 부여한다.</p>" +
+      '<div class="contract-section-title">5. 계약해지 및 기타</div>' +
+      "<p>'갑'은 '을'이 중대한 업무상 잘못, 무단결근, 근무태만, 그 밖에 취업규칙·사회통념상 근로관계 유지가 곤란한 사유가 있을 경우 계약해지를 통보할 수 있다. " +
+      "본 근로계약서에 명시되지 않은 사항은 '갑'의 취업규칙과 노동관계법령에 따른다.</p>" +
+      '<div class="contract-section-title">6. 개인정보 제공 동의</div>' +
+      "<p>개인정보(주민등록번호, 주소, 계좌정보, 급여 등)를 4대보험 업무관련 수행회사 및 관련기관에 제공하는데에 동의한다.</p>" +
+      "<p>본 근로계약서를 정히 교부받았음을 확인한다. (전자적 방법 포함)</p>" +
+      "<p class=\"contract-date-line\">" + escapeHtml(c.contractDateLine || "") + "</p>" +
+    "</div>";
+  }
+  function buildContractBodyHtml(type, c) {
+    return type === "daily" ? buildDailyContractBodyHtml(c) : buildMonthlyContractBodyHtml(c);
   }
 
   // ---- 서명 패드 (마우스/터치 겸용) — 계약서·개인정보동의서 공통으로 재사용 ----
