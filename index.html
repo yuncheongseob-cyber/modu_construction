@@ -196,8 +196,9 @@
   }
   .remember-check input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 
+  .photo-add-row { display: flex; gap: 8px; }
   .photo-add-btn {
-    width: 100%; padding: 10px; border: 1.5px dashed var(--border); border-radius: 8px;
+    flex: 1 1 0; width: 100%; padding: 10px; border: 1.5px dashed var(--border); border-radius: 8px;
     background: var(--surface-2); color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer;
   }
   .photo-add-btn:hover { border-color: var(--accent); color: var(--text); }
@@ -593,7 +594,7 @@
   }
   .cal-nav-btn:hover { color: var(--text); border-color: var(--accent); }
 
-  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 14px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 14px; padding: 0 4px; box-sizing: border-box; }
   .cal-wd-label { text-align: center; font-size: 11px; font-weight: 600; color: var(--text-faint); padding-bottom: 4px; }
   .cal-wd-label.wd-sun { color: var(--bad); }
   .cal-wd-label.wd-sat { color: var(--accent); }
@@ -762,6 +763,12 @@
   .modal-card .submit-btn { flex: 1; }
 
   .role-breakdown { font-size: 10.5px; color: var(--text-faint); font-weight: 400; margin-top: 2px; white-space: normal; }
+  .nextday-oneline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+  .memo-item { padding: 12px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .memo-item:last-child { border-bottom: none; }
+  .memo-item:hover { background: var(--surface-2); }
+  .memo-item-date { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+  .memo-item-text { font-size: 13.5px; color: var(--text); line-height: 1.5; white-space: pre-wrap; }
   .ycard-note { font-size: 10.5px; color: #B58900; font-weight: 600; margin-top: 2px; white-space: normal; }
   .row-edit-btn {
     border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
@@ -872,7 +879,7 @@
   </div>
 
   <div class="toggle" role="tablist" artifact-local>
-    <button type="button" id="tabInput" class="active" role="tab">📱 현장 입력</button>
+    <button type="button" id="tabInput" class="active" role="tab">📱 작업일보</button>
     <button type="button" id="tabDash" role="tab">🖥 관리자 대시보드</button>
   </div>
 
@@ -1594,7 +1601,8 @@
   function formatNextDayPlanHtml(e) {
     var txt = formatNextDayPlanText(e);
     if (!txt) return "";
-    return '<div class="role-breakdown">📋 명일: ' + escapeHtml(txt) + "</div>";
+    // 목록에서는 한 줄로 깔끔하게 잘라서 보여주고(줄바꿈되면 지저분해 보여서), 전체 내용은 마우스 오버(title)로 볼 수 있게 한다.
+    return '<div class="role-breakdown nextday-oneline" title="명일: ' + escapeHtml(txt) + '">📋 명일: ' + escapeHtml(txt) + "</div>";
   }
   function workerLabel(e) {
     var id = e.workerId || "—";
@@ -1758,7 +1766,7 @@
     return "" +
       '<div class="phone-wrap"><div class="phone">' +
         '<div class="phone-topbar">' +
-          '<div class="app-name">🦺 현장 입력</div>' +
+          '<div class="app-name">🦺 작업일보</div>' +
           '<div class="app-sub">로그인하고 오늘 작업을 기록하세요</div>' +
         "</div>" +
         '<div class="phone-body">' +
@@ -1785,7 +1793,8 @@
     var navBtnsHtml = "";
     if (!isWarehouse) {
       navBtnsHtml += '<button type="button" class="' + (currentInputTab === "entry" ? "active" : "") + '" data-itab="entry"><span class="nav-icon">📋</span><span>실적 입력</span></button>' +
-        '<button type="button" class="' + (currentInputTab === "manday" ? "active" : "") + '" data-itab="manday"><span class="nav-icon">🧾</span><span>내 공수 캘린더</span></button>';
+        '<button type="button" class="' + (currentInputTab === "manday" ? "active" : "") + '" data-itab="manday"><span class="nav-icon">🧾</span><span>내 공수 캘린더</span></button>' +
+        '<button type="button" class="' + (currentInputTab === "memos" ? "active" : "") + '" data-itab="memos"><span class="nav-icon">🗒</span><span>메모</span></button>';
     }
     navBtnsHtml += '<button type="button" class="' + (currentInputTab === "attendance" ? "active" : "") + '" data-itab="attendance"><span class="nav-icon">⏰</span><span>출퇴근</span></button>';
     if (isWarehouse || isLead) {
@@ -1804,6 +1813,7 @@
       '<div class="worker-sidebar-nav">' + navBtnsHtml + "</div>" +
     "</nav>";
     var body = currentInputTab === "manday" ? buildMandayCalendarHtml(st) :
+      currentInputTab === "memos" ? buildMemoListHtml(st, account) :
       currentInputTab === "attendance" ? buildAttendanceViewHtml(st) :
       currentInputTab === "materials" ? (isWarehouse ? buildWarehouseMaterialsHtml(st, account) : buildLeadMaterialsHtml(st, account)) :
       currentInputTab === "contracts" ? buildContractSignHtml(st, account) :
@@ -1850,7 +1860,7 @@
       '<div class="work-area-block-head">작업구역 ' + (idx + 1) +
         (idx > 0 ? '<button type="button" class="work-area-remove" data-area-remove="1">✕ 삭제</button>' : "") +
       "</div>" +
-      '<div class="field"><label>현장</label><select data-role="site">' + siteO + "</select></div>" +
+      '<div class="field"><label>동</label><select data-role="site">' + siteO + "</select></div>" +
       '<div class="field"><label>층</label><select data-role="floor">' + floorO + "</select></div>" +
       '<div class="field-row">' +
         '<div class="field"><label>X열 (기둥기준)</label><div class="range-inputs">' +
@@ -1872,10 +1882,10 @@
       '<div class="qty-grid">' + qtyRole("conduit-channel", "Channel", "M") + qtyRole("conduit-pipe", "Pipe", "M") + "</div>" +
       '<div class="section-title">케이블 작업<span class="unit-note">제단 · 포설 · 결선</span></div>' +
       '<div class="qty-grid">' +
-        qtyRole("cable-cut", "제단", "M") + qtyRole("cable-layout", "포설", "M") + qtyRole("cable-wire", "결선", "M") +
+        qtyRole("cable-cut", "제단", "M") + qtyRole("cable-layout", "포설", "M") + qtyRole("cable-wire", "결선", "Point") +
       "</div>" +
       '<div class="section-title">계기 작업<span class="unit-note">Instrument</span></div>' +
-      '<div class="qty-grid">' + qtyRole("inst-point", "Instrument", "point") + "</div>" +
+      '<div class="qty-grid">' + qtyRole("inst-point", "Instrument", "ea") + "</div>" +
     "</div>";
   }
   function buildEntryFormHtml(st) {
@@ -1885,7 +1895,7 @@
       return "" +
         '<div class="phone-wrap"><div class="phone">' +
           '<div class="phone-topbar">' +
-            '<div class="app-name">🦺 현장 입력</div>' +
+            '<div class="app-name">🦺 작업일보</div>' +
             '<div class="app-sub">오늘 작업 실적을 기록하세요</div>' +
           "</div>" +
           '<div class="phone-body">' +
@@ -1911,7 +1921,7 @@
     return "" +
       '<div class="phone-wrap"><div class="phone">' +
         '<div class="phone-topbar">' +
-          '<div class="app-name">🦺 현장 입력</div>' +
+          '<div class="app-name">🦺 작업일보</div>' +
           '<div class="app-sub">오늘 작업 실적을 기록하세요</div>' +
         "</div>" +
         '<div class="phone-body">' +
@@ -1921,13 +1931,13 @@
           '<div class="field"><label>작업일자</label><input type="date" id="fDate" value="' + todayStr() + '"></div>' +
           '<div class="manday-hint" id="fMandayHint"></div>' +
 
-          '<div class="section-title">작업구역<span class="unit-note">현장·층·위치·작업량 · 구역이 여러 곳이면 추가할 수 있어요</span></div>' +
+          '<div class="section-title">작업구역<span class="unit-note">동·층·위치·작업량 · 구역이 여러 곳이면 추가할 수 있어요 (같은 현장이면 "동"만 다시 고르면 돼요)</span></div>' +
           '<div id="workAreaBlocks">' + buildWorkAreaBlockHtml(0) + "</div>" +
           '<button type="button" class="next-plan-add-btn" id="btnAddWorkArea">+ 작업구역 추가</button>' +
 
           '<div class="section-title">기타<span class="unit-note">Y카드(Yellow Card) · 재작업</span></div>' +
           '<div class="qty-grid">' +
-            qtyInput("qInstYcard", "Y카드", "EA") + qtyInput("qInstRework", "재작업", "point") +
+            qtyInput("qInstYcard", "Y카드", "EA") + qtyInput("qInstRework", "재작업", "ea") +
           "</div>" +
           '<div class="field"><label>Y카드 사유</label><input type="text" id="qInstYcardReason" placeholder="예: 배선 오류로 재검사 요청"></div>' +
 
@@ -1944,7 +1954,11 @@
 
           '<div class="section-title">작업 사진<span class="unit-note">선택 사항</span></div>' +
           '<input type="file" id="fPhotoInput" accept="image/*" multiple capture="environment" style="display:none">' +
-          '<button type="button" class="photo-add-btn" id="btnAddPhoto">📷 사진 추가</button>' +
+          '<input type="file" id="fPhotoGalleryInput" accept="image/*" multiple style="display:none">' +
+          '<div class="photo-add-row">' +
+            '<button type="button" class="photo-add-btn" id="btnAddPhoto">📷 카메라로 촬영</button>' +
+            '<button type="button" class="photo-add-btn" id="btnAddPhotoGallery">🖼 갤러리에서 선택</button>' +
+          "</div>" +
           '<div class="photo-thumbs" id="photoThumbs"></div>' +
 
           '<button type="button" class="submit-btn" id="btnSubmit">오늘 실적 저장</button>' +
@@ -2081,6 +2095,41 @@
           '<button type="button" class="submit-btn" id="btnSaveManday">공수 저장</button>' +
         "</div>" +
       "</div></div>";
+  }
+
+  // 공수 캘린더에서 날짜별로 남긴 메모를 매달 달력을 오가며 찾지 않아도 한 곳에서 모아볼 수 있게 한다.
+  function buildMemoListHtml(st, account) {
+    var rows = (st.mandayLog || [])
+      .filter(function (r) { return r.workerId === account.workerId && r.note && r.note.trim(); })
+      .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+    var listHtml = rows.length ? rows.map(function (r) {
+      var d = new Date(r.date + "T00:00:00");
+      var label = (d.getMonth() + 1) + "월 " + d.getDate() + "일 (" + WEEKDAY_LABELS[d.getDay()] + ")";
+      return '<div class="memo-item" data-memo-date="' + escapeHtml(r.date) + '">' +
+        '<div class="memo-item-date">' + escapeHtml(label) + "</div>" +
+        '<div class="memo-item-text">' + escapeHtml(r.note) + "</div>" +
+      "</div>";
+    }).join("") : '<div class="empty-state">아직 남긴 메모가 없어요. "내 공수 캘린더"에서 날짜를 고르고 메모를 적어보세요.</div>';
+    return '<div class="phone-wrap"><div class="phone">' +
+      '<div class="phone-topbar">' +
+        '<div class="app-name">🗒 메모</div>' +
+        '<div class="app-sub">공수 캘린더에 날짜별로 남긴 메모를 모아서 볼 수 있어요</div>' +
+      "</div>" +
+      '<div class="phone-body">' + listHtml + "</div>" +
+    "</div></div>";
+  }
+  function wireMemoList() {
+    var scopeEl = document.getElementById("viewInput");
+    if (!scopeEl) return;
+    Array.prototype.forEach.call(scopeEl.querySelectorAll("[data-memo-date]"), function (row) {
+      row.addEventListener("click", function () {
+        var date = row.getAttribute("data-memo-date");
+        currentMandayMonth = date.slice(0, 7);
+        mandaySelectedDate = date;
+        currentInputTab = "manday";
+        renderInputView();
+      });
+    });
   }
 
   // ---- attendance (clock in/out) ----
@@ -3039,7 +3088,7 @@
         "<td>" + escapeHtml(formatWorkAreasText(e)) + "</td>" +
         '<td class="num-cell">' + fmt(pKey ? pKey.personnel : 0) + "</td>" +
       "</tr>";
-    }).join("") : '<tr><td colspan="6"><div class="empty-state">아직 입력된 실적이 없습니다. "현장 입력" 탭에서 첫 실적을 기록해보세요.</div></td></tr>';
+    }).join("") : '<tr><td colspan="6"><div class="empty-state">아직 입력된 실적이 없습니다. "작업일보" 탭에서 첫 실적을 기록해보세요.</div></td></tr>';
 
     return kpiHtml + perPersonPanelHtml +
       '<div class="dash-grid">' +
@@ -3249,7 +3298,7 @@
         '<td><button type="button" class="row-edit-btn" data-edit-entry="' + e.id + '">✎ 수정</button></td>' +
       "</tr>";
     }).join("") : '<tr><td colspan="11"><div class="empty-state">' +
-      (st.entries.length === 0 ? '아직 입력된 실적이 없습니다. "현장 입력" 탭에서 첫 실적을 기록해보세요.' : "선택한 조건(" + dateFilterSummary(allDates, dateFilter) + ")에 해당하는 실적이 없습니다.") +
+      (st.entries.length === 0 ? '아직 입력된 실적이 없습니다. "작업일보" 탭에서 첫 실적을 기록해보세요.' : "선택한 조건(" + dateFilterSummary(allDates, dateFilter) + ")에 해당하는 실적이 없습니다.") +
       "</div></td></tr>";
 
     return toolbarHtml + kpiHtml +
@@ -3602,13 +3651,13 @@
           ["전선관 Pipe", fmt(b.conduit.pipe), "M"],
           ["케이블 제단", fmt(b.cable.cut), "M"],
           ["케이블 포설", fmt(b.cable.layout), "M"],
-          ["케이블 결선", fmt(b.cable.wire), "M"]
+          ["케이블 결선", fmt(b.cable.wire), "Point"]
         ] },
         { title: "계기 · 품질", items: [
-          ["Instrument", fmt(b.instrument.point), "point"],
+          ["Instrument", fmt(b.instrument.point), "ea"],
           ["Y카드", fmt(b.instrument.ycard), "EA"],
-          ["재작업", fmt(b.instrument.rework), "point"],
-          ["불량수량", fmt(b.defectQty), "point·EA"],
+          ["재작업", fmt(b.instrument.rework), "ea"],
+          ["불량수량", fmt(b.defectQty), "ea·EA"],
           ["불량률", fmt1(defectRate(b)), "%"]
         ] },
         { title: "공수당설치", items: [
@@ -4939,7 +4988,7 @@
     var withPhotos = entries.filter(function (e) { return e.photos && e.photos.length; });
     var count = withPhotos.reduce(function (n, e) { return n + e.photos.length; }, 0);
     if (!withPhotos.length) {
-      return emptyPanel("작업 사진", '업로드된 사진이 없습니다. "현장 입력"에서 실적을 저장할 때 사진을 첨부해보세요.');
+      return emptyPanel("작업 사진", '업로드된 사진이 없습니다. "작업일보"에서 실적을 저장할 때 사진을 첨부해보세요.');
     }
     var groupsHtml = withPhotos.map(function (e) {
       var color = teamColor(teams, e.team);
@@ -5106,6 +5155,10 @@
       wireMandayCalendar();
       return;
     }
+    if (currentInputTab === "memos") {
+      wireMemoList();
+      return;
+    }
     if (currentInputTab === "attendance") {
       wireAttendanceView();
       return;
@@ -5135,8 +5188,21 @@
     var addWorkAreaBtn = document.getElementById("btnAddWorkArea");
     if (addWorkAreaBtn) addWorkAreaBtn.addEventListener("click", function () {
       var container = document.getElementById("workAreaBlocks");
-      var idx = container.querySelectorAll(".work-area-block").length;
+      var blocks = container.querySelectorAll(".work-area-block");
+      var idx = blocks.length;
+      // 어차피 같은 현장 안에서 작업구역을 추가하는 거라서, 직전 구역에서 고른 "동"을 그대로 이어받는다.
+      // (다른 동에서 작업했다면 그때만 바꿔주면 되니 매번 다시 고를 필요가 없다)
+      var lastSiteVal = "";
+      if (blocks.length) {
+        var lastSiteSel = blocks[blocks.length - 1].querySelector('[data-role="site"]');
+        if (lastSiteSel) lastSiteVal = lastSiteSel.value;
+      }
       container.insertAdjacentHTML("beforeend", buildWorkAreaBlockHtml(idx));
+      if (lastSiteVal) {
+        var newBlocks = container.querySelectorAll(".work-area-block");
+        var newSiteSel = newBlocks[newBlocks.length - 1].querySelector('[data-role="site"]');
+        if (newSiteSel) newSiteSel.value = lastSiteVal;
+      }
     });
     var workAreaContainer = document.getElementById("workAreaBlocks");
     if (workAreaContainer) workAreaContainer.addEventListener("click", function (ev) {
@@ -5165,6 +5231,15 @@
       handleSelectedFiles(e.target.files);
       this.value = "";
     });
+    var galleryBtn = document.getElementById("btnAddPhotoGallery");
+    var galleryInput = document.getElementById("fPhotoGalleryInput");
+    if (galleryBtn && galleryInput) {
+      galleryBtn.addEventListener("click", function () { galleryInput.click(); });
+      galleryInput.addEventListener("change", function (e) {
+        handleSelectedFiles(e.target.files);
+        this.value = "";
+      });
+    }
     renderPhotoThumbs();
     document.getElementById("btnSubmit").addEventListener("click", submitEntry);
   }
@@ -6493,7 +6568,7 @@
           '<div class="sync-note" id="syncNote"><span class="sync-dot" id="syncDot"></span><span id="syncText">동기화 확인 중…</span></div>' +
         "</div>" +
         '<div class="toggle" role="tablist" artifact-local>' +
-          '<button type="button" id="tabInput" class="active" role="tab">📱 현장 입력</button>' +
+          '<button type="button" id="tabInput" class="active" role="tab">📱 작업일보</button>' +
           '<button type="button" id="tabDash" role="tab">🖥 관리자 대시보드</button>' +
         "</div>" +
         '<div id="viewInput" class="view active">' + buildInputViewHtml(st) + "</div>" +
