@@ -445,11 +445,6 @@
   .contract-date-line { text-align: center; margin-top: 18px; font-weight: 600; }
   .wage-detail-toggle { border: 1px solid var(--border); background: var(--surface); color: var(--accent); font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; cursor: pointer; margin-left: 4px; }
   .wage-detail-wrap { margin: 8px 0 4px; }
-  .consent-pdf-wrap { position: relative; margin: 10px 0 4px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; min-height: 120px; }
-  .consent-pdf-canvas { display: block; width: 100%; height: auto; }
-  .consent-pdf-loading { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; font-size: 12.5px; color: var(--text-muted); background: var(--surface-2); }
-  .consent-pdf-spinner { width: 26px; height: 26px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: consent-spin 0.8s linear infinite; }
-  @keyframes consent-spin { to { transform: rotate(360deg); } }
   .contract-confirm-box { margin: 16px 0 4px; padding: 10px 12px; background: var(--surface-2); border-radius: 10px; }
   .contract-sig-section { margin: 14px 0; }
   .contract-sig-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
@@ -1183,26 +1178,6 @@
       cbs.forEach(function (f) { f(jszipLoaded); });
     });
   }
-  // 개인정보동의서 픽셀 오버레이용: 원본 PDF를 캔버스에 그대로 렌더링하기 위한 pdf.js 로더.
-  var pdfjsLoaded = false, pdfjsFailed = false, pdfjsLoading = false, pdfjsReadyCallbacks = [];
-  function ensurePdfJs(cb) {
-    if (pdfjsLoaded || pdfjsFailed) { cb(pdfjsLoaded); return; }
-    pdfjsReadyCallbacks.push(cb);
-    if (pdfjsLoading) return;
-    pdfjsLoading = true;
-    loadScriptSeq(["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"], function (ok) {
-      pdfjsLoading = false;
-      if (ok && window.pdfjsLib) {
-        try {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-          pdfjsLoaded = true;
-        } catch (e) { pdfjsFailed = true; }
-      } else { pdfjsFailed = true; }
-      var cbs = pdfjsReadyCallbacks; pdfjsReadyCallbacks = [];
-      cbs.forEach(function (f) { f(pdfjsLoaded); });
-    });
-  }
-
   function initFirebaseSync() {
     ensureFirebase(function () {
       if (!firebaseDb) {
@@ -1735,16 +1710,15 @@
         '<div class="field"><label>현장</label><select id="authSite"></select></div>' +
         '<div id="authTeamFieldWrap">' +
           '<div class="field"><label>소속팀</label><select id="authTeam"></select></div>' +
-          '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>' +
         "</div>";
     } else {
-      var teamOpts = st.teams.map(function (t) {
+      // 소속팀은 관리자가 미리 등록해둔 것 중에서만 고를 수 있다 (여기서 직접 새로 만들 수 없음).
+      var teamOpts = st.teams.length ? st.teams.map(function (t) {
         return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
-      }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
+      }).join("") : '<option value="">(등록된 팀이 없어요 — 관리자에게 문의하세요)</option>';
       siteFieldsHtml =
         '<div id="authTeamFieldWrap">' +
           '<div class="field"><label>소속팀</label><select id="authTeam">' + teamOpts + "</select></div>" +
-          '<div class="field" id="authTeamNewWrap" style="display:none"><label>새 팀 이름</label><input type="text" id="authTeamNew" placeholder="예: 박정호팀"></div>' +
         "</div>";
     }
 
@@ -1784,8 +1758,6 @@
     var account = currentAccount();
     // 개인정보 수집·이용 동의서는 최초 입사(가입) 시 1회만 받으면 되므로, 아직 안 했다면 다른 화면보다 먼저 이걸 막아선다.
     if (!st.privacyConsents || !st.privacyConsents[account.workerId]) return buildPrivacyConsentGateHtml(st, account);
-    // 서명 직후 한 번은 "완성된 문서" 화면(원본 PDF + 서명 미리보기 + 다운로드)을 보여준다.
-    if (consentShowSignedDoc) return buildConsentSignedDocHtml(st, account);
     var isWarehouse = account.role === WAREHOUSE_ROLE;
     var isLead = account.role === LEAD_ROLE;
     if (isWarehouse && currentInputTab !== "materials" && currentInputTab !== "attendance") currentInputTab = "materials";
@@ -2538,49 +2510,16 @@
   }
 
   // ---- 작업자 화면: 개인정보 수집·이용 동의서 (최초 입사시 1회) ----
-  // 원본 PDF(assets/privacy-consent-template.pdf)를 pdf.js로 캔버스에 그대로 그려서 배경으로 쓰고("색상조차 바뀌면 안됨"),
-  // 그 위에 입력값을 실제 빈칸 좌표(포인트 단위, PDF 페이지 기준 595x841)에 캔버스로 "스탬프"해서 최종 모습을 실시간 미리보기한다.
-  // 좌표는 pdfplumber로 원본 PDF의 글자/표 좌표를 직접 추출해서 얻은 값이라 눈대중이 아니라 정확하다.
-  // 인터넷/캐시 문제로 pdf.js 로딩이나 PDF 렌더링이 실패하면 기존 HTML 재현 버전으로 자동 폴백한다.
+  // 서명 후 "완성된 문서" 이미지를 원본 PDF 위에 실시간으로 그려서 보여주는 화면은 로딩이 계속 느리게 느껴져서
+  // (pdf.js로 매번 PDF를 새로 불러와 렌더링해야 해서 일반 파일 다운로드보다 무거운 작업임) 없앴다.
+  // 동의 내용(이름·생년월일·서명 등)은 아래에서 그대로 저장되며, 서명이 끝나면 바로 원래 화면으로 돌아간다.
   var PRIVACY_ID_TYPES = [
     { key: "resident", label: "주민등록번호" },
     { key: "license", label: "운전면허번호" },
     { key: "passport", label: "여권번호" },
     { key: "foreigner", label: "외국인등록번호" }
   ];
-  var CONSENT_PDF_URL = "assets/privacy-consent-template.pdf";
-  var CONSENT_PDF_W = 595, CONSENT_PDF_H = 841; // 원본 PDF 페이지 크기(포인트)
-  var CONSENT_FIELDS = {
-    name:     { x0: 127, top: 93, x1: 249, bottom: 114 },
-    birth_y:  { x0: 327, top: 93, x1: 353, bottom: 114 },
-    birth_m:  { x0: 367, top: 93, x1: 383, bottom: 114 },
-    birth_d:  { x0: 397, top: 93, x1: 413, bottom: 114 },
-    gender_m: { x0: 507.4, top: 99.1, x1: 517.4, bottom: 109.1 },
-    gender_f: { x0: 532.5, top: 99.1, x1: 542.5, bottom: 109.1 },
-    idtype_label: {
-      resident:  { x0: 320, top: 585.4, x1: 400, bottom: 597.3 },
-      license:   { x0: 320, top: 597.3, x1: 400, bottom: 609.1 },
-      passport:  { x0: 320, top: 609.1, x1: 400, bottom: 620.9 },
-      foreigner: { x0: 320, top: 620.9, x1: 400, bottom: 632.7 }
-    },
-    idtype_value: {
-      resident:  { x0: 404, top: 585.4, x1: 542, bottom: 597.3 },
-      license:   { x0: 404, top: 597.3, x1: 542, bottom: 609.1 },
-      passport:  { x0: 404, top: 609.1, x1: 542, bottom: 620.9 },
-      foreigner: { x0: 404, top: 620.9, x1: 542, bottom: 632.7 }
-    },
-    date_y: { x0: 258, top: 682.1, x1: 276, bottom: 691.1 },
-    date_m: { x0: 289, top: 682.1, x1: 307, bottom: 691.1 },
-    date_d: { x0: 320, top: 682.1, x1: 339, bottom: 691.1 },
-    // "동의인 성명 :" 뒤 밑줄 칸(392~486pt)에 이름을 먼저 적고, 그 다음 칸에 서명이 들어가도록 둘로 나눈다.
-    // 서명은 인쇄된 글자 줄 높이(19pt)보다 위아래로 넉넉하게 키워도 위/아래 줄과 안 겹치는 걸 pdfplumber로 확인함.
-    sig_name: { x0: 394, top: 703, x1: 427, bottom: 719 },
-    sig:      { x0: 427, top: 693, x1: 487, bottom: 731 }
-  };
-  var consentShowSignedDoc = false; // 서명 직후에만 "완성된 문서 보기" 화면을 한 번 보여주기 위한 일회성 플래그
 
-  // 동의/입력 단계는 항상 텍스트로만 보여준다(원본 PDF를 그 자리에서 그리면 로딩 체감이 느려서).
-  // 원본 그대로의 모습은 서명이 끝난 "다운로드" 화면에서만 pdf.js로 렌더링해 보여준다.
   function buildPrivacyConsentGateHtml(st, account) {
     var idTypeOptsHtml = PRIVACY_ID_TYPES.map(function (t, idx) {
       return '<label class="remember-check" style="display:block;margin-bottom:6px"><input type="radio" name="consentIdType" value="' + t.key + '"' + (idx === 0 ? " checked" : "") + "> " + t.label + "</label>";
@@ -2644,205 +2583,7 @@
     "</div></div>";
   }
 
-  // 서명이 끝난 뒤 "완성된 문서" 화면: 원본 PDF를 배경으로 저장된 값 + 서명을 얹어서 보여주고 다운로드 버튼을 제공한다.
-  function buildConsentSignedDocHtml(st, account) {
-    return '<div class="phone-wrap"><div class="phone" style="max-width:460px">' +
-      '<div class="phone-topbar"><div class="app-name">✅ 동의서 작성 완료</div><div class="app-sub">원본 서식에 서명이 반영된 최종 문서예요</div></div>' +
-      '<div class="phone-body">' +
-        '<div class="consent-pdf-wrap" id="consentPdfWrap">' +
-          '<canvas id="consentPdfCanvas" class="consent-pdf-canvas"></canvas>' +
-          '<div class="consent-pdf-loading" id="consentPdfLoading"><div class="consent-pdf-spinner"></div><div>서명한 내용을 원본 서식에 반영하는 중이에요…</div></div>' +
-        "</div>" +
-        '<div class="panel-caption" id="consentPdfFailNote" style="margin-top:8px" hidden>⚠ 원본 서식을 불러오지 못해 미리보기를 표시할 수 없어요. 값은 정상 저장됐으니 나중에 다시 확인해보세요.</div>' +
-        '<button type="button" class="account-bar-btn" id="btnConsentDownload" style="margin-top:12px" disabled>⬇ 동의서 이미지 다운로드</button>' +
-        '<button type="button" class="submit-btn" id="btnConsentContinue" style="margin-top:10px">확인, 계속하기</button>' +
-      "</div>" +
-    "</div></div>";
-  }
-
-  // 원본 문서의 인쇄 서체와 최대한 비슷하게 보이도록, 앱 전체에서 이미 쓰고 있는 한글 웹폰트를 그대로 사용한다.
-  // (시스템 기본 폰트로 그리면 기기마다 자간·굵기가 들쭉날쭉하고 원본과 이질감이 커서 이렇게 통일함)
-  var CONSENT_STAMP_FONT_STACK = '"Pretendard","Malgun Gothic","Apple SD Gothic Neo",sans-serif';
-  var CONSENT_STAMP_COLOR = "#191F28"; // 기입 정보는 원본 서식 글자와 구분되지 않도록 검정 계열로 통일 (기존엔 파란색이었음)
-  function composeConsentCanvas(canvas, baseCanvas, data) {
-    var ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    var scale = canvas.width / CONSENT_PDF_W;
-    ctx.drawImage(baseCanvas, 0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = CONSENT_STAMP_COLOR;
-
-    function box(f) { return { x0: f.x0 * scale, top: f.top * scale, x1: f.x1 * scale, bottom: f.bottom * scale }; }
-    function stamp(text, f, opts) {
-      if (!text) return;
-      opts = opts || {};
-      var b = box(f);
-      var fontSize = Math.max(7, (b.bottom - b.top) * (opts.sizeRatio || 0.56));
-      ctx.fillStyle = CONSENT_STAMP_COLOR;
-      ctx.font = (opts.bold ? "600 " : "500 ") + fontSize + "px " + CONSENT_STAMP_FONT_STACK;
-      ctx.textAlign = opts.align || "left";
-      var x = opts.align === "center" ? (b.x0 + b.x1) / 2 : b.x0 + 3;
-      var y = b.bottom - fontSize * 0.26;
-      ctx.fillText(text, x, y);
-    }
-    function checkIn(f) {
-      var b = box(f);
-      var fontSize = (b.bottom - b.top) * 0.85;
-      ctx.font = "700 " + fontSize + "px " + CONSENT_STAMP_FONT_STACK;
-      ctx.textAlign = "center";
-      ctx.fillStyle = CONSENT_STAMP_COLOR;
-      ctx.fillText("✓", (b.x0 + b.x1) / 2, b.bottom - fontSize * 0.12);
-    }
-    function highlightRow(f) {
-      var b = box(f);
-      ctx.save();
-      ctx.fillStyle = "rgba(25,31,40,0.10)";
-      ctx.fillRect(b.x0, b.top, b.x1 - b.x0, b.bottom - b.top);
-      ctx.restore();
-    }
-
-    stamp(data.name, CONSENT_FIELDS.name, { align: "center" });
-
-    var bd = (data.birthdate || "").replace(/[^0-9]/g, "");
-    if (bd.length >= 2) stamp(bd.slice(0, 2), CONSENT_FIELDS.birth_y, { align: "center" });
-    if (bd.length >= 4) stamp(bd.slice(2, 4), CONSENT_FIELDS.birth_m, { align: "center" });
-    if (bd.length >= 6) stamp(bd.slice(4, 6), CONSENT_FIELDS.birth_d, { align: "center" });
-
-    if (data.gender === "남") checkIn(CONSENT_FIELDS.gender_m);
-    else if (data.gender === "여") checkIn(CONSENT_FIELDS.gender_f);
-
-    var idType = data.idType || "resident";
-    if (CONSENT_FIELDS.idtype_label[idType]) highlightRow(CONSENT_FIELDS.idtype_label[idType]);
-    if (CONSENT_FIELDS.idtype_value[idType]) stamp(data.idNumber || "", CONSENT_FIELDS.idtype_value[idType], {});
-
-    var agreedDate = new Date(data.agreedAt || Date.now());
-    stamp(String(agreedDate.getFullYear()).slice(2), CONSENT_FIELDS.date_y, { align: "center" });
-    stamp(String(agreedDate.getMonth() + 1), CONSENT_FIELDS.date_m, { align: "center" });
-    stamp(String(agreedDate.getDate()), CONSENT_FIELDS.date_d, { align: "center" });
-
-    // 맨 아래 "동의인 성명 : ______ (서명 또는 인)" 줄: 이름은 글자로 먼저 찍고, 그 다음 칸에 서명을 얹는다.
-    stamp(data.name, CONSENT_FIELDS.sig_name, { align: "center", sizeRatio: 0.66 });
-
-    if (data.signatureDataUrl) {
-      var img = new Image();
-      img.onload = function () {
-        var b = box(CONSENT_FIELDS.sig);
-        // 서명 패드 캔버스에는 실제로 쓴 글씨 주변에 흰 여백이 많이 남아있어서, 그대로 칸에 맞추면 서명이 작아 보인다.
-        // 실제 잉크(흰색이 아닌 픽셀)만 찾아 그 부분만 잘라서 칸 크기에 맞게 키워 채운다.
-        var crop = getSignatureInkBBox(img);
-        var sx = 0, sy = 0, sw = img.width, sh = img.height;
-        if (crop) {
-          var pad = Math.max(crop.w, crop.h) * 0.08;
-          sx = Math.max(0, crop.x - pad);
-          sy = Math.max(0, crop.y - pad);
-          sw = Math.min(img.width - sx, crop.w + pad * 2);
-          sh = Math.min(img.height - sy, crop.h + pad * 2);
-        }
-        var ratio = Math.min((b.x1 - b.x0) / sw, (b.bottom - b.top) / sh);
-        var dw = sw * ratio, dh = sh * ratio;
-        var dx = b.x0 + ((b.x1 - b.x0) - dw) / 2;
-        var dy = b.bottom - dh;
-        ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
-      };
-      img.src = data.signatureDataUrl;
-    }
-  }
-  // 서명 이미지에서 실제로 잉크가 그려진 영역(거의 흰색이 아닌 픽셀)의 경계 상자를 찾는다.
-  function getSignatureInkBBox(img) {
-    var c = document.createElement("canvas");
-    c.width = img.width; c.height = img.height;
-    var cx = c.getContext("2d");
-    if (!cx) return null;
-    cx.drawImage(img, 0, 0);
-    var data;
-    try { data = cx.getImageData(0, 0, c.width, c.height).data; } catch (e) { return null; }
-    var minX = c.width, minY = c.height, maxX = -1, maxY = -1;
-    var threshold = 250;
-    for (var y = 0; y < c.height; y++) {
-      for (var x = 0; x < c.width; x++) {
-        var i = (y * c.width + x) * 4;
-        if (data[i + 3] > 10 && (data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold)) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-    if (maxX < minX || maxY < minY) return null;
-    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
-  }
-
-  // 원본 PDF를 pdf.js로 불러와 한 번 렌더링해둔 "빈 서식" 캔버스를 캐시해서 재사용한다.
-  // 동의서 화면이 뜨자마자(사용자가 아직 내용을 읽고 서명하는 동안) 미리 백그라운드로 불러와두면,
-  // 실제로 "완성된 문서" 화면으로 넘어갈 때는 이미 다 준비돼있어서 기다리는 시간이 거의 없어진다.
-  var consentPdfBasePromise = null;
-  function getConsentPdfBase() {
-    if (consentPdfBasePromise) return consentPdfBasePromise;
-    consentPdfBasePromise = new Promise(function (resolve) {
-      ensurePdfJs(function (ok) {
-        if (!ok || !window.pdfjsLib) { resolve(null); return; }
-        window.pdfjsLib.getDocument(CONSENT_PDF_URL).promise.then(function (pdf) {
-          return pdf.getPage(1);
-        }).then(function (page) {
-          var viewport = page.getViewport({ scale: 2 });
-          var base = document.createElement("canvas");
-          base.width = viewport.width;
-          base.height = viewport.height;
-          var baseCtx = base.getContext("2d");
-          var fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready.catch(function () {}) : Promise.resolve();
-          return Promise.all([page.render({ canvasContext: baseCtx, viewport: viewport }).promise, fontsReady]).then(function () {
-            resolve({ base: base, viewport: viewport });
-          });
-        }).catch(function () { resolve(null); });
-      });
-    });
-    return consentPdfBasePromise;
-  }
-
-  function wireConsentSignedDoc(account) {
-    var data = (state.privacyConsents || {})[account.workerId];
-    var loadingEl = document.getElementById("consentPdfLoading");
-    var failNote = document.getElementById("consentPdfFailNote");
-    var downloadBtn = document.getElementById("btnConsentDownload");
-    var continueBtn = document.getElementById("btnConsentContinue");
-    if (continueBtn) continueBtn.addEventListener("click", function () {
-      consentShowSignedDoc = false;
-      renderInputView();
-    });
-    if (!data) return;
-    getConsentPdfBase().then(function (result) {
-      var canvas = document.getElementById("consentPdfCanvas");
-      if (!canvas) return;
-      if (!result) {
-        if (loadingEl) loadingEl.hidden = true;
-        if (failNote) failNote.hidden = false;
-        return;
-      }
-      canvas.width = result.viewport.width;
-      canvas.height = result.viewport.height;
-      if (loadingEl) loadingEl.hidden = true;
-      composeConsentCanvas(canvas, result.base, { name: account.name || account.workerId, gender: data.gender, birthdate: data.birthdate, idType: data.idType, idNumber: data.idNumber, signatureDataUrl: data.signatureDataUrl, agreedAt: data.agreedAt });
-      if (downloadBtn) {
-        downloadBtn.disabled = false;
-        downloadBtn.addEventListener("click", function () {
-          // 캔버스를 그대로 이미지로 다운로드한다. 서명이 캔버스에 그려지기까지 약간의 시간차가 있을 수 있어 지연 후 캡처한다.
-          setTimeout(function () {
-            var a = document.createElement("a");
-            a.href = canvas.toDataURL("image/png");
-            a.download = "개인정보동의서_" + (account.name || account.workerId) + ".png";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          }, 60);
-        });
-      }
-    });
-  }
-
   function wirePrivacyConsentGate() {
-    // 사용자가 이 화면에서 내용을 읽고 서명하는 동안(보통 수십 초 이상) 미리 원본 PDF를 백그라운드로 불러와둔다.
-    // 그래야 서명 완료 후 "완성된 문서" 화면으로 넘어갔을 때 기다리는 시간이 거의 없어진다.
-    getConsentPdfBase();
     var residentWrap = document.getElementById("consentIdResidentWrap");
     var genericWrap = document.getElementById("consentIdGenericWrap");
     var residentPrefixEl = document.getElementById("consentIdResidentPrefix");
@@ -2914,7 +2655,6 @@
       persist(function (ok) {
         if (ok) {
           showToast("동의서 작성이 완료됐어요");
-          consentShowSignedDoc = true;
           renderInputView();
         }
       });
@@ -5129,11 +4869,6 @@
       wirePrivacyConsentGate();
       return;
     }
-    if (gateAccount && consentShowSignedDoc) {
-      wireConsentSignedDoc(gateAccount);
-      return;
-    }
-
     var logoutBtn = document.getElementById("btnLogout");
     if (logoutBtn) logoutBtn.addEventListener("click", function () {
       clearLoggedInWorkerId();
@@ -5640,11 +5375,10 @@
       var refreshTeamOptions = function () {
         var site = findSite(state, siteSel.value);
         var teams = (site && site.teams) ? site.teams : [];
-        teamSel.innerHTML = teams.map(function (t) {
+        // 소속팀은 그 현장에 관리자가 미리 등록해둔 팀 중에서만 고를 수 있다 (여기서 직접 새로 만들 수 없음).
+        teamSel.innerHTML = teams.length ? teams.map(function (t) {
           return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>";
-        }).join("") + '<option value="__new__">+ 새 팀 직접입력</option>';
-        var wrap = document.getElementById("authTeamNewWrap");
-        if (wrap) wrap.style.display = "none";
+        }).join("") : '<option value="">(등록된 팀이 없어요 — 관리자에게 문의하세요)</option>';
       };
       var refreshSiteOptions = function () {
         var idx = parseInt(companySel.value, 10);
@@ -5658,10 +5392,6 @@
       companySel.addEventListener("change", refreshSiteOptions);
       siteSel.addEventListener("change", refreshTeamOptions);
       refreshSiteOptions();
-    } else if (teamSel) {
-      teamSel.addEventListener("change", function () {
-        document.getElementById("authTeamNewWrap").style.display = this.value === "__new__" ? "block" : "none";
-      });
     }
     var roleSel = document.getElementById("authRole");
     var teamFieldWrap = document.getElementById("authTeamFieldWrap");
@@ -5723,11 +5453,7 @@
       if (!site) { authError = "현장을 선택해주세요"; renderInputView(); return; }
       siteName = site.name;
     }
-    if (!isWarehouse && teamSel === "__new__") {
-      var nv = document.getElementById("authTeamNew").value.trim();
-      if (!nv) { authError = "새 팀 이름을 입력해주세요"; renderInputView(); return; }
-      team = nv;
-    }
+    if (!isWarehouse && !team) { authError = "소속팀을 선택해주세요. 목록에 없다면 관리자에게 팀 등록을 요청해주세요"; renderInputView(); return; }
     authBusy = true; authError = ""; renderInputView();
     hashPassword(id, pw).then(function (hash) {
       if (!state.accounts) state.accounts = {};
