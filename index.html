@@ -578,8 +578,6 @@
   .auth-tabs button.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
   .auth-error { font-size: 12px; color: #fff; background: var(--bad); padding: 8px 10px; border-radius: 8px; margin: 4px 0 12px; }
 
-  .manday-total { font-size: 13px; color: var(--text-muted); margin: 14px 0 10px; }
-  .manday-total b { color: var(--text); font-family: "IBM Plex Mono", monospace; }
 
   .cal-monthnav { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 4px 0 12px; }
   .cal-month-label { font-family: "Pretendard", "IBM Plex Sans KR", sans-serif; font-weight: 700; font-size: 16.5px; min-width: 96px; text-align: center; }
@@ -589,7 +587,7 @@
   }
   .cal-nav-btn:hover { color: var(--text); border-color: var(--accent); }
 
-  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 14px; padding: 0 4px; box-sizing: border-box; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 14px; padding: 0 8px; box-sizing: border-box; width: 100%; max-width: 100%; }
   .cal-wd-label { text-align: center; font-size: 11px; font-weight: 600; color: var(--text-faint); padding-bottom: 4px; }
   .cal-wd-label.wd-sun { color: var(--bad); }
   .cal-wd-label.wd-sat { color: var(--accent); }
@@ -616,6 +614,18 @@
     font-size: 9.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft);
     border-radius: 999px; padding: 1px 6px; font-family: "IBM Plex Mono", monospace;
   }
+  .cal-site-tag {
+    font-size: 8px; font-weight: 600; color: var(--text-muted); background: var(--surface-3);
+    border-radius: 5px; padding: 0 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .manday-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .manday-summary-item { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; text-align: center; }
+  .manday-summary-item .ms-label { font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+  .manday-summary-item .ms-value { font-size: 18px; font-weight: 700; color: var(--text); font-family: "IBM Plex Mono", monospace; }
+  .manday-site-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 12px; }
+  .manday-site-table th, .manday-site-table td { border: 1px solid var(--border); padding: 5px 8px; text-align: center; }
+  .manday-site-table th { background: var(--surface-2); font-weight: 600; color: var(--text-muted); }
 
   .manday-editor {
     background: var(--surface-2); border-radius: 10px; padding: 12px 14px; margin-bottom: 6px;
@@ -1956,7 +1966,7 @@
     if (!mandayDraftStore[month]) {
       var d = {};
       (st.mandayLog || []).forEach(function (r) {
-        if (r.workerId === workerId && r.date.slice(0, 7) === month) d[r.date] = { shifts: (r.shifts || []).slice(), note: r.note || "" };
+        if (r.workerId === workerId && r.date.slice(0, 7) === month) d[r.date] = { shifts: (r.shifts || []).slice(), note: r.note || "", site: r.site || "" };
       });
       mandayDraftStore[month] = d;
     }
@@ -1973,11 +1983,7 @@
     var account = currentAccount();
     var workerId = account ? account.workerId : "";
     var site = account && account.siteId ? findSite(st, account.siteId) : null;
-    var siteTeams = (site && site.teams && site.teams.length) ? site.teams : st.teams; // 소속 현장이 없으면(예: 예전 계정) 전체 팀으로 대체
-    var team = (account && account.team) || siteTeams[0] || "";
-    var teamOpts = siteTeams.map(function (t) {
-      return '<option value="' + escapeHtml(t) + '"' + (t === team ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
-    }).join("");
+    var defaultSiteName = (site && site.name) || "";
     var month = currentMandayMonth || todayStr().slice(0, 7);
     ensureMandayDraft(st, workerId, month);
     var today = todayStr();
@@ -1990,12 +1996,29 @@
     var firstDow = new Date(y, mo - 1, 1).getDay();
     var prevMonthDays = daysInMonth(mo === 1 ? y - 1 : y, mo === 1 ? 12 : mo - 1);
 
+    // 일용직 특성상 우리 현장이 아닌 다른 현장에서 일하는 날도 있을 수 있어서, 날짜별로 현장을 구분해서
+    // 기록하고 현장별로도 합계를 볼 수 있게 한다. 현장을 따로 적지 않은 날은 내 소속 현장으로 간주한다.
     var total = 0;
     var workDayCount = 0;
+    var bySite = {}; // siteName -> {days, total}
+    var siteOrder = [];
     Object.keys(mandayDraft).forEach(function (k) {
       var v = mandayShiftValue(mandayDraft[k].shifts);
-      if (v > 0) { total += v; workDayCount += 1; }
+      if (v > 0) {
+        total += v; workDayCount += 1;
+        var sName = (mandayDraft[k].site && mandayDraft[k].site.trim()) || defaultSiteName || "현장 미지정";
+        if (!bySite[sName]) { bySite[sName] = { days: 0, total: 0 }; siteOrder.push(sName); }
+        bySite[sName].days += 1;
+        bySite[sName].total += v;
+      }
     });
+    var siteBreakdownHtml = siteOrder.length > 1 ?
+      '<div class="table-wrap"><table class="manday-site-table">' +
+        '<tr><th>현장</th><th>근무일수</th><th>공수</th></tr>' +
+        siteOrder.map(function (sName) {
+          return '<tr><td>' + escapeHtml(sName) + '</td><td>' + bySite[sName].days + '일</td><td>' + fmt1(bySite[sName].total) + '</td></tr>';
+        }).join("") +
+      "</table></div>" : "";
 
     var weekdayHeader = WEEKDAY_LABELS.map(function (w, i) {
       return '<div class="cal-wd-label' + (i === 0 ? " wd-sun" : i === 6 ? " wd-sat" : "") + '">' + w + "</div>";
@@ -2010,15 +2033,17 @@
     var dayCells = "";
     for (var d = 1; d <= days; d++) {
       var dateStr = month + "-" + String(d).padStart(2, "0");
-      var dayEntry = mandayDraft[dateStr] || { shifts: [], note: "" };
+      var dayEntry = mandayDraft[dateStr] || { shifts: [], note: "", site: "" };
       var val = mandayShiftValue(dayEntry.shifts);
       var hasNote = !!(dayEntry.note && dayEntry.note.trim());
+      var otherSite = !!(dayEntry.site && dayEntry.site.trim() && dayEntry.site.trim() !== defaultSiteName);
       var isToday = dateStr === today;
       var isSelected = dateStr === mandaySelectedDate;
       var cls = "cal-cell" + (isToday ? " cal-today" : "") + (isSelected ? " cal-selected" : "") + (val ? " cal-has-value" : "");
       dayCells += '<button type="button" class="' + cls + '" data-date="' + dateStr + '">' +
         '<span class="cal-daynum">' + d + "</span>" +
         (val ? '<span class="cal-badge">' + fmt1(val) + "</span>" : "") +
+        (otherSite ? '<span class="cal-site-tag" title="' + escapeHtml(dayEntry.site.trim()) + '">' + escapeHtml(dayEntry.site.trim().slice(0, 4)) + "</span>" : "") +
         (hasNote ? '<span class="cal-note-dot" title="메모 있음"></span>' : "") +
       "</button>";
     }
@@ -2030,7 +2055,7 @@
       trailCells += '<div class="cal-cell cal-outside"><span class="cal-daynum">' + tc + "</span></div>";
     }
 
-    var selEntry = mandayDraft[mandaySelectedDate] || { shifts: [], note: "" };
+    var selEntry = mandayDraft[mandaySelectedDate] || { shifts: [], note: "", site: "" };
     var selShifts = selEntry.shifts;
     var selVal = mandayShiftValue(selShifts);
     var selD = new Date(mandaySelectedDate + "T00:00:00");
@@ -2039,6 +2064,8 @@
       var active = selShifts.indexOf(k) >= 0;
       return '<button type="button" class="shift-chip' + (active ? " active" : "") + '" data-shift="' + k + '">' + SHIFT_LABELS[k] + "</button>";
     }).join("");
+    var siteDatalistOpts = (defaultSiteName ? [defaultSiteName] : []).concat(siteOrder.filter(function (s) { return s !== defaultSiteName && s !== "현장 미지정"; }))
+      .map(function (s) { return '<option value="' + escapeHtml(s) + '">'; }).join("");
 
     return "" +
       '<div class="phone-wrap"><div class="phone">' +
@@ -2047,7 +2074,11 @@
           '<div class="app-sub">날짜를 선택하고 근무형태를 눌러 공수를 등록하세요</div>' +
         "</div>" +
         '<div class="phone-body">' +
-          '<div class="field"><label>소속팀</label><select id="mTeam">' + teamOpts + "</select></div>" +
+          '<div class="manday-summary">' +
+            '<div class="manday-summary-item"><div class="ms-label">근무일수</div><div class="ms-value">' + workDayCount + "일</div></div>" +
+            '<div class="manday-summary-item"><div class="ms-label">이 달 합계 공수</div><div class="ms-value" id="mandayTotal">' + fmt1(total) + "</div></div>" +
+          "</div>" +
+          siteBreakdownHtml +
 
           '<div class="cal-monthnav">' +
             '<button type="button" class="cal-nav-btn" data-monthnav="-1">‹</button>' +
@@ -2060,10 +2091,10 @@
             '<div class="me-date">' + escapeHtml(selLabel) + "</div>" +
             '<div class="me-shifts">' + editorChips + "</div>" +
             '<div class="me-value">' + (selVal ? fmt1(selVal) + "공수 등록됨" : "선택된 근무가 없어요") + "</div>" +
+            '<div class="field" style="margin:10px 0 0"><label>현장</label><input type="text" id="mSite" list="mSiteList" value="' + escapeHtml(selEntry.site || "") + '" placeholder="' + escapeHtml(defaultSiteName || "예: OO현장") + '"><datalist id="mSiteList">' + siteDatalistOpts + "</datalist></div>" +
             '<div class="field" style="margin:10px 0 0"><label>메모</label><textarea id="mNote" rows="2" placeholder="예: 반차, 교육, 특이사항 메모">' + escapeHtml(selEntry.note || "") + "</textarea></div>" +
           "</div>" +
 
-          '<div class="manday-total">이 달 합계 <b id="mandayTotal">' + fmt1(total) + "공수</b> · 근무일수 " + workDayCount + "일</div>" +
           '<button type="button" class="submit-btn" id="btnSaveManday">공수 저장</button>' +
         "</div>" +
       "</div></div>";
@@ -2143,12 +2174,7 @@
   function buildAttendanceViewHtml(st) {
     var account = currentAccount();
     var workerId = account ? account.workerId : "";
-    var site = account && account.siteId ? findSite(st, account.siteId) : null;
-    var siteTeams = (site && site.teams && site.teams.length) ? site.teams : st.teams; // 소속 현장이 없으면(예: 예전 계정) 전체 팀으로 대체
-    var team = (account && account.team) || siteTeams[0] || "";
-    var teamOpts = siteTeams.map(function (t) {
-      return '<option value="' + escapeHtml(t) + '"' + (t === team ? " selected" : "") + '>' + escapeHtml(t) + "</option>";
-    }).join("");
+    var team = (account && account.team) || ""; // 계정에 이미 있는 소속팀을 그대로 쓴다 (여기서 따로 고를 필요 없음)
     var log = (st.attendance || []).filter(function (r) { return r.workerId === workerId; });
     var today = todayStr();
     var openRecord = log.filter(function (r) { return !r.clockOutAt; }).sort(attendanceSortDesc)[0];
@@ -2199,10 +2225,10 @@
         geoStatusHtml + photoFallbackHtml +
         '<button type="button" class="att-clock-btn att-in" id="btnClockIn"' + disabledAttr + '>출근하기</button>';
     }
-    return finishAttendancePhone(workerId, team, teamOpts, statusHtml, log, geo);
+    return finishAttendancePhone(workerId, team, statusHtml, log, geo);
   }
 
-  function finishAttendancePhone(workerId, team, teamOpts, statusHtml, log, geo) {
+  function finishAttendancePhone(workerId, team, statusHtml, log, geo) {
     var mapHtml = geo.enabled ?
       '<div class="att-map small" id="attGeoWorkerMap"><div class="att-map-fallback">지도를 불러오는 중…</div></div>' +
       '<div class="att-map-legend"><span><span class="dot" style="background:#E8630A"></span>지정 현장 반경</span><span><span class="dot" style="background:#2E7D32"></span>내 위치 (반경 안)</span><span><span class="dot" style="background:#C0392B"></span>내 위치 (반경 밖)</span></div>' :
@@ -2226,7 +2252,6 @@
           '<div class="app-sub">출근·퇴근 버튼을 눌러 근무 시간을 기록하세요</div>' +
         "</div>" +
         '<div class="phone-body">' +
-          '<div class="field"><label>소속팀</label><select id="aTeam">' + teamOpts + "</select></div>" +
           mapHtml +
           statusHtml +
           (historyItems ? '<div class="att-history"><div class="att-history-title">최근 출퇴근 기록</div>' + historyItems + "</div>" :
@@ -2530,7 +2555,7 @@
   // pdfplumber로 실제 PDF에서 뽑아낸 좌표 (top-origin, pt 단위). 문서 상단 기준 top/bottom.
   var CONSENT_FIELDS = {
     name:     { x0: 127, top: 93, x1: 249, bottom: 114 },
-    birth_y:  { x0: 327, top: 93, x1: 353, bottom: 114 },
+    birth_y:  { x0: 309, top: 93, x1: 353, bottom: 114 }, // "생년월일" 글자와 "년" 글자 사이 빈 공간 전체 (4자리 연도가 들어가도록 넓힘)
     birth_m:  { x0: 367, top: 93, x1: 383, bottom: 114 },
     birth_d:  { x0: 397, top: 93, x1: 413, bottom: 114 },
     gender_m: { x0: 507.4, top: 99.1, x1: 517.4, bottom: 109.1 },
@@ -2646,10 +2671,14 @@
                 });
               }
               var bd = consent.birthdate || "";
-              var by = bd.length === 6 ? "19" + bd.slice(0, 2) : "";
-              // 6자리(YYMMDD) 저장값이라 세기 접두는 20/19를 정확히 알 수 없으므로, 뒤 4자리(월/일)만 정밀하게 맞추고
-              // 연도는 두 자리 그대로 찍는다 (실제 서식도 "년" 칸이 좁아 두 자리로 충분).
-              var by2 = bd.length === 6 ? bd.slice(0, 2) : "";
+              // 6자리(YYMMDD)로만 저장돼 있어 몇 년생인지(19XX/20XX) 정확히는 알 수 없지만, 건설 현장 근로자는
+              // 성인이라는 점을 감안해 최소 근로연령(17세) 기준으로 세기를 추정한다.
+              var by4 = "";
+              if (bd.length === 6) {
+                var yy = parseInt(bd.slice(0, 2), 10);
+                var cutoff = new Date().getFullYear() - 2000 - 17;
+                by4 = String((yy <= cutoff ? 2000 : 1900) + yy);
+              }
               var bm = bd.length === 6 ? bd.slice(2, 4) : "";
               var bdd = bd.length === 6 ? bd.slice(4, 6) : "";
               var idTypeKey = consent.idType || "resident";
@@ -2660,12 +2689,11 @@
               var name = account.name || account.workerId || "";
               var steps = [];
               steps.push(stamp(CONSENT_FIELDS.name, name, CONSENT_SIZE_RATIO.name, false));
-              steps.push(stamp(CONSENT_FIELDS.birth_y, by2, CONSENT_SIZE_RATIO.birth, false));
+              steps.push(stamp(CONSENT_FIELDS.birth_y, by4, CONSENT_SIZE_RATIO.birth, false));
               steps.push(stamp(CONSENT_FIELDS.birth_m, bm, CONSENT_SIZE_RATIO.birth, false));
               steps.push(stamp(CONSENT_FIELDS.birth_d, bdd, CONSENT_SIZE_RATIO.birth, false));
               var genderBox = consent.gender === "여" ? CONSENT_FIELDS.gender_f : CONSENT_FIELDS.gender_m;
-              steps.push(stamp(genderBox, "○", 0.9, true));
-              if (CONSENT_FIELDS.idtype_label[idTypeKey]) steps.push(stamp(CONSENT_FIELDS.idtype_label[idTypeKey], "✓", 0.8, true));
+              steps.push(stamp(genderBox, "V", 0.9, true));
               if (CONSENT_FIELDS.idtype_value[idTypeKey]) steps.push(stamp(CONSENT_FIELDS.idtype_value[idTypeKey], consent.idNumber || "", CONSENT_SIZE_RATIO.idtype_value, false));
               steps.push(stamp(CONSENT_FIELDS.date_y, sy, CONSENT_SIZE_RATIO.date, false));
               steps.push(stamp(CONSENT_FIELDS.date_m, sm, CONSENT_SIZE_RATIO.date, false));
@@ -5174,9 +5202,6 @@
   }
 
   function wireMandayCalendar() {
-    document.getElementById("mTeam").addEventListener("change", function () {
-      // 소속팀은 계정에 고정된 값이라 이 화면에서 바꾼 건 이번 화면에서만 쓰이고 저장되진 않는다.
-    });
     document.getElementById("viewInput").querySelector(".cal-monthnav").addEventListener("click", function (e) {
       var btn = e.target.closest ? e.target.closest("[data-monthnav]") : null;
       if (!btn) return;
@@ -5194,19 +5219,26 @@
       var chip = e.target.closest ? e.target.closest(".shift-chip") : null;
       if (!chip) return;
       var k = chip.getAttribute("data-shift");
-      var entry = mandayDraft[mandaySelectedDate] || { shifts: [], note: "" };
+      var entry = mandayDraft[mandaySelectedDate] || { shifts: [], note: "", site: "" };
       var arr = entry.shifts.slice();
       var idx = arr.indexOf(k);
       if (idx >= 0) arr.splice(idx, 1); else arr.push(k);
       entry.shifts = arr;
-      if (arr.length || (entry.note && entry.note.trim())) mandayDraft[mandaySelectedDate] = entry; else delete mandayDraft[mandaySelectedDate];
+      if (arr.length || (entry.note && entry.note.trim()) || (entry.site && entry.site.trim())) mandayDraft[mandaySelectedDate] = entry; else delete mandayDraft[mandaySelectedDate];
       renderInputView();
     });
     var noteEl = document.getElementById("mNote");
     if (noteEl) {
       noteEl.addEventListener("input", function () {
-        if (!mandayDraft[mandaySelectedDate]) mandayDraft[mandaySelectedDate] = { shifts: [], note: "" };
+        if (!mandayDraft[mandaySelectedDate]) mandayDraft[mandaySelectedDate] = { shifts: [], note: "", site: "" };
         mandayDraft[mandaySelectedDate].note = this.value;
+      });
+    }
+    var siteEl = document.getElementById("mSite");
+    if (siteEl) {
+      siteEl.addEventListener("input", function () {
+        if (!mandayDraft[mandaySelectedDate]) mandayDraft[mandaySelectedDate] = { shifts: [], note: "", site: "" };
+        mandayDraft[mandaySelectedDate].site = this.value;
       });
     }
     document.getElementById("btnSaveManday").addEventListener("click", saveMandayCalendar);
@@ -5460,7 +5492,7 @@
     var account = currentAccount();
     if (!account) { showToast("로그인이 필요해요"); renderInputView(); return; }
     var workerId = account.workerId;
-    var team = document.getElementById("aTeam").value;
+    var team = account.team || "";
     var geo = getAttGeo(state);
     var geoOk = attLocationState.status === "ok" && attLocationState.within;
     var geoFailed = geo.enabled && (attLocationState.status === "error" || attLocationState.status === "unsupported");
@@ -5745,7 +5777,8 @@
     var account = currentAccount();
     if (!account) { showToast("로그인이 필요해요"); renderInputView(); return; }
     var workerId = account.workerId;
-    var team = document.getElementById("mTeam").value;
+    // 소속팀은 계정에 이미 고정돼 있고 관리자 화면에서도 그대로 보이므로, 이 화면에서 따로 고를 필요가 없다.
+    var team = account.team || "";
     if (!state.mandayLog) state.mandayLog = [];
     var month = currentMandayMonth || todayStr().slice(0, 7);
     // drop this worker+month's existing records, then re-add from the draft
@@ -5756,9 +5789,10 @@
       var entry = mandayDraft[dateStr];
       var shifts = entry.shifts || [];
       var note = (entry.note || "").trim();
+      var site = (entry.site || "").trim();
       var v = mandayShiftValue(shifts);
       if (shifts.length || note) {
-        state.mandayLog.push({ workerId: workerId, team: team, date: dateStr, shifts: shifts, value: v, note: note });
+        state.mandayLog.push({ workerId: workerId, team: team, date: dateStr, shifts: shifts, value: v, note: note, site: site });
       }
     });
     var btn = document.getElementById("btnSaveManday");
